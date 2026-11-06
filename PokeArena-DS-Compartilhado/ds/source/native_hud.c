@@ -752,8 +752,8 @@ static void battle(const Game *g) {
     int hp=gameMaxHp(g),evolution=gameEvolutionPercent(g),seconds=gameSecondsLeft(g);
     int enemy=gameEnemySpecies(g);
     bool evoReady=evolution==100 && gameStage(g)<gameFinalStage(g);
-    panel(4,4,176,42,HUD_EDGE,HUD_SURFACE);
-    panel(184,4,68,42,HUD_EDGE,HUD_SURFACE);
+    panel(4,4,176,42,MENU_SILVER,MENU_SLATE);
+    panel(184,4,68,42,MENU_SILVER,MENU_SLATE);
     panel(7,7,34,34,CYAN,HUD_INK);
     portrait(gamePlayerSpecies(g),9,9,30);
     text(45,8,gamePlayerName(g),WHITE,1);
@@ -765,12 +765,12 @@ static void battle(const Game *g) {
     snprintf(s,sizeof(s),"%d%%",evolution);
     textRight(141,33,s,evoReady?WHITE:PURPLE);
     const HudButton *evo=&hudButtons[6];
-    panel(evo->x,evo->y,evo->w,evo->h,evoReady?CYAN:HUD_EDGE,evoReady?SELECTED:HUD_INK);
+    panel(evo->x,evo->y,evo->w,evo->h,evoReady?MENU_BLUE_EDGE:MENU_STEEL_BLUE,evoReady?MENU_BLUE_FACE:MENU_INK);
     centeredLabel(evo,2,gameStage(g)==gameFinalStage(g)?"MAX":"EVO",evoReady?WHITE:MUTED,false);
     text(203,8,"TEMPO",CYAN,1);
     snprintf(s,sizeof(s),"%02d:%02d",seconds/60,seconds%60);
     text(188,22,s,seconds<=30?ORANGE:WHITE,2);
-    panel(4,49,248,18,HUD_EDGE,HUD_SURFACE);
+    panel(4,49,248,18,MENU_SILVER,MENU_SLATE);
     if(g->mode==MODE_TEAM) {
         text(12,51,"PARCEIRO",CYAN,1);
         text(76,51,"RIVAL 1",WHITE,1);
@@ -781,7 +781,7 @@ static void battle(const Game *g) {
         textRight(245,54,"VS 2x2",YELLOW);
     } else {
         portrait(enemy,7,51,14);
-        rect(24,52,22,12,HUD_CHIP);
+        rect(24,52,22,12,MENU_BLUE_FIELD);
         text(26,54,"CPU",CYAN,1);
         text(50,54,starters[enemy].name,WHITE,1);
         lifeBar(113,54,75,8,g->enemyHp,g->enemyMaxHp);
@@ -791,44 +791,39 @@ static void battle(const Game *g) {
             textRight(245,54,s,g->wave==3?ORANGE:YELLOW);
         }
     }
-    static const uint8_t commandColors[MOVE_COUNT]={CARD_VIOLET,CARD_OLIVE,CARD_BLUE,CARD_ROSE};
     for(int i=0;i<MOVE_COUNT;++i) {
         const HudButton *b=&hudButtons[i];
         const MoveDef *m=gameMoveDef(g,i);
         bool ready=g->moveCooldowns[i]==0;
         bool active=g->attackAnim && g->lastAttack==i;
         int element=m->element;
-        int theme=commandColors[i];
-        commandCard(b,ready?MOVE_FACE+theme:HUD_CHIP,
-                    ready?MOVE_BEVEL+theme:HUD_EDGE,active?48+element:HUD_INK);
-        rect(b->x+7,b->y+7,4,4,48+element);
-        centeredLabel(b,7,m->name,ready?YELLOW:WHITE,true);
-        if(ready) {
-            snprintf(s,sizeof(s),"%c  %s","ABXY"[i],kinds[m->kind]);
-            centeredLabel(b,21,s,WHITE,true);
-        } else {
+        menuCard(b,22,active);
+        char key[2]={"ABXY"[i],0};
+        menuKey(b->x+6,b->y+9,19,key);
+        rect(b->x+7,b->y+27,16,2,48+element);
+        text(b->x+33,b->y+7,m->name,WHITE,1);
+        if(ready) text(b->x+33,b->y+20,kinds[m->kind],MUTED,1);
+        else {
             int t=(g->moveCooldowns[i]*10+GAME_HZ-1)/GAME_HZ;
-            snprintf(s,sizeof(s),"%c  RECARGA %d.%ds","ABXY"[i],t/10,t%10);
-            centeredLabel(b,20,s,CYAN,false);
-            gauge(b->x+10,b->y+30,b->w-20,4,m->cooldownTicks-g->moveCooldowns[i],m->cooldownTicks,48+element);
+            snprintf(s,sizeof(s),"RECARGA %d.%ds",t/10,t%10);
+            text(b->x+33,b->y+19,s,CYAN,1);
+            gauge(b->x+33,b->y+30,b->w-41,3,m->cooldownTicks-g->moveCooldowns[i],m->cooldownTicks,CYAN);
         }
     }
     const HudButton *dodge=&hudButtons[4],*ult=&hudButtons[5],*pause=&hudButtons[7];
     bool dodgeReady=!g->dodgeCooldown;
-    commandCard(dodge,dodgeReady?MOVE_FACE+CARD_BLUE:HUD_CHIP,
-                dodgeReady?MOVE_BEVEL+CARD_BLUE:HUD_EDGE,HUD_INK);
+    menuCard(dodge,0,g->dodgeTimer>0);
     centeredLabel(dodge,7,"ESQUIVA",WHITE,true);
     centeredLabel(dodge,20,g->dodgeTimer?"L  EM USO":dodgeReady?"L  PRONTA":"L  RECARGA",dodgeReady?WHITE:MUTED,true);
     bool ultimate=g->attackAnim && g->lastAttack==4;
     bool charged=g->ultimateCharge==100;
-    commandCard(ult,charged?MOVE_FACE+CARD_AMBER:MOVE_FACE+CARD_VIOLET,
-                charged?MOVE_BEVEL+CARD_AMBER:MOVE_BEVEL+CARD_VIOLET,ultimate?YELLOW:HUD_INK);
+    menuCard(ult,0,charged||ultimate);
     centeredLabel(ult,7,"ULTIMATE",charged?YELLOW:WHITE,true);
     if(charged) strcpy(s,"R  PRONTO");
     else snprintf(s,sizeof(s),"R  %d%%",g->ultimateCharge);
     centeredLabel(ult,18,s,charged?YELLOW:WHITE,true);
     gauge(ult->x+9,ult->y+28,ult->w-18,4,g->ultimateCharge,100,charged?YELLOW:PURPLE);
-    commandCard(pause,HUD_CHIP,HUD_EDGE,HUD_INK);
+    menuCard(pause,0,false);
     centeredLabel(pause,7,"PAUSA",WHITE,true);
     centeredLabel(pause,20,"START",MUTED,false);
 }
@@ -881,7 +876,7 @@ static void helpOrCreditsMenu(bool help) {
     menuButton(menuBack.x,menuBack.y,menuBack.w,menuBack.h,"< VOLTAR",false);
 }
 void nativeHudDraw(const Game *g) {
-    memset(bottomPixels,g->state==STATE_FIGHT && !g->introTicks?HUD_SURFACE:BACK,sizeof(bottomPixels));canvas=bottomPixels;
+    memset(bottomPixels,g->state==STATE_FIGHT && !g->introTicks?MENU_FRAME:BACK,sizeof(bottomPixels));canvas=bottomPixels;
     if(g->state==STATE_FIGHT && g->introTicks)matchup(g);
     else if(g->state==STATE_FIGHT)battle(g);
     else if(g->state==STATE_SELECT||g->state==STATE_OPPONENT)selection(g);
