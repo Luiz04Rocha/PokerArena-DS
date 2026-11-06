@@ -1,0 +1,10 @@
+# Build with: make -f Makefile.blocksds
+NAME := arena_dupla_dsi
+GAME_TITLE := PokeArena DS v0.29
+GAME_SUBTITLE := Prototipo nativo DS / DSi
+GAME_AUTHOR := Luiz
+SOURCEDIRS := source
+INCLUDEDIRS := include
+CFLAGS := -std=gnu17 -Wextra
+BLOCKSDS ?= /opt/blocksds/core
+include $(BLOCKSDS)/sys/default_makefiles/rom_arm9/Makefile
