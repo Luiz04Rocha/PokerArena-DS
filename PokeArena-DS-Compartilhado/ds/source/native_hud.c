@@ -797,12 +797,18 @@ static void battle(const Game *g) {
         bool ready=g->moveCooldowns[i]==0;
         bool active=g->attackAnim && g->lastAttack==i;
         int element=m->element;
-        menuCard(b,22,active);
+        menuCard(b,22,ready||active);
         char key[2]={"ABXY"[i],0};
         menuKey(b->x+6,b->y+9,19,key);
         rect(b->x+7,b->y+27,16,2,48+element);
-        text(b->x+33,b->y+7,m->name,WHITE,1);
-        if(ready) text(b->x+33,b->y+20,kinds[m->kind],MUTED,1);
+        text(b->x+33,b->y+5,m->name,ready||active?WHITE:MUTED,1);
+        if(active) {
+            rect(b->x+3,b->y+3,2,b->h-6,YELLOW);
+            text(b->x+33,b->y+20,"ACIONADO",YELLOW,1);
+        } else if(ready) {
+            text(b->x+33,b->y+16,kinds[m->kind],MUTED,1);
+            text(b->x+33,b->y+26,"PRONTO",WHITE,1);
+        }
         else {
             int t=(g->moveCooldowns[i]*10+GAME_HZ-1)/GAME_HZ;
             snprintf(s,sizeof(s),"RECARGA %d.%ds",t/10,t%10);
