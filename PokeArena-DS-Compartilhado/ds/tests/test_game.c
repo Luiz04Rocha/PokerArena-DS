@@ -527,7 +527,7 @@ static void testSolidCover(void) {
     Game g=fight(MODE_VS);
     g.enemyCooldown=10000;
     g.playerX=rock->x*POS_SCALE;
-    for(int t=0;t<24;++t) gameUpdateInput(&g,0,IN_UP);
+    for(int t=0;t<32;++t) gameUpdateInput(&g,0,IN_UP);
     assert(g.playerY==south && !g.moving);
     for(int t=0;t<14;++t) gameUpdateInput(&g,0,IN_UP|IN_RIGHT);
     assert(g.playerX>(rock->x+rock->halfWidth+ARENA_ACTOR_MARGIN)*POS_SCALE && g.playerY<south);
@@ -560,7 +560,7 @@ static void testSolidCover(void) {
            p->x/POS_SCALE>=impactX-1 && p->x/POS_SCALE<=impactX) splash=true;
     }
     assert(splash);
-    g.enemyX=(impactX-10)*POS_SCALE;
+    g.enemyX=(impactX-6)*POS_SCALE;
     g.projectiles[0]=(Projectile){ARENA_LEFT*POS_SCALE,sideY,90*POS_SCALE,0,30,4,true,false,ELEMENT_FIRE};
     gameUpdate(&g,0);
     assert(g.enemyHp==hp-20); /* Cover behind the target does not eat the hit. */

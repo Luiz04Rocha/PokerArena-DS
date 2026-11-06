@@ -156,7 +156,7 @@ static void damageEnemy(Game *g, int damage) {
         for(int i=0;i<2;++i) g->casts[i].age=30;
         g->enemyDodgeTimer = g->enemyDodgeCooldown = 0;
         g->partnerCooldown = 45;
-        g->enemyX = (g->wave==2?40:176) * POS_SCALE;
+        g->enemyX = (g->wave==2?46:176) * POS_SCALE;
         g->enemyY = (g->wave==2?68:117) * POS_SCALE;
         memset(g->projectiles,0,sizeof(g->projectiles));
         memset(g->castEvents,0,sizeof(g->castEvents));

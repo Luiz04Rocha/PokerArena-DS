@@ -162,6 +162,8 @@ static void prop(int x,int y,int w,int h,int u,int v,int tw,int th) {
     glTexCoord2i(u+tw,v+th);projectedVertex((left+w)*256,bottom*256,z);
     glTexCoord2i(u,v+th);projectedVertex(left*256,bottom*256,z);endPrimitive();
 }
+static const int lanternX[]={31,225};
+enum { LANTERN_Y=47 };
 static void sceneryProps(void) {
     glBindTexture(0,textures[GROUND_TEXTURE+2]);glColor(RGB15(31,31,31));
     const int fenceX[6]={22,52,82,174,204,234};
@@ -173,7 +175,7 @@ static void sceneryProps(void) {
         else if(p->kind!=PROP_TREE)
             prop(p->x,p->y,p->width,p->height,p->kind==PROP_ROCK_MOSS?32:0,0,32,32);
     }
-    prop(31,47,32,32,96,0,32,32);prop(225,47,32,32,96,0,32,32);
+    for(int i=0;i<2;++i) prop(lanternX[i],LANTERN_Y,32,32,96,0,32,32);
 }
 static void ellipse(int x,int y,int rx,int ry,int height,int color) {
     noTexture();color=tintColor(color);if(recording)recordCommand(FIFO_COLOR,(uint32_t)color,0,1);else glColor(color);
@@ -630,24 +632,32 @@ void sceneDraw(const Game *g,const Game *old,int half,int displayTicks) {
     if(period>=2) {
         noTexture();
         for(int lamp=0;lamp<2;++lamp)for(int ring=0;ring<3;++ring) {
-            int x=lamp?218:38,rad=24-ring*7;
-            glPolyFmt(POLY_ALPHA((period==3?4:2)+ring*3)|POLY_CULL_NONE|POLY_ID(56+ring));
-            glColor(RGB15(31,25,12));beginPrimitive(GL_TRIANGLE_STRIP);
+            int x=lanternX[lamp],y=LANTERN_Y+3,rad=22-ring*6;
+            glPolyFmt(POLY_ALPHA((period==3?3:1)+ring*2)|POLY_CULL_NONE|POLY_ID(56+ring));
+            glColor(RGB15(31,23,10));beginPrimitive(GL_TRIANGLE_STRIP);
             for(int i=0;i<=12;++i) {
-                int a=i*32768/12;worldVertex(x,58,2+ring);
-                worldVertex(x+cosLerp(a)*rad/4096,58+sinLerp(a)*rad/4096,2+ring);
+                int a=i*32768/12;worldVertex(x,y,2+ring);
+                worldVertex(x+cosLerp(a)*rad/4096,y+sinLerp(a)*rad/4096,2+ring);
             }
             endPrimitive();
         }
     }
     /* A handful of drifting leaves, at the margins of the playable clearing. */
     noTexture();glPolyFmt(POLY_ALPHA(19)|POLY_CULL_NONE|POLY_ID(55));
-    for(int i=0;i<4;++i) {
-        int t=(int)(g->frameCounter/2)+i*67,x=(t/2+i*53)%280-12,y=35+(t+i*47)%180;
-        if(abs(x-128)<65&&abs(y-117)<45)continue;
-        flatColor(17+i,22,7);beginPrimitive(GL_TRIANGLES);
-        worldVertex(x-2,y,14);worldVertex(x+2,y,15);worldVertex(x,y+3,14);endPrimitive();
+    beginPrimitive(GL_QUADS);
+    for(int i=0;i<8;++i) {
+        int periodTicks=92+i*9;
+        int t=(g->frameCounter+i*43u)%periodTicks;
+        if(t>=periodTicks-12) continue;
+        int x=(i&1?242:24)+sinLerp(t*640+i*4096)/512;
+        int y=66+(i/2)*37+t/9;
+        int height=25-t*23/(periodTicks-12);
+        int width=1+abs(sinLerp(t*960+i*1024))/2048;
+        color(i%3?RGB15(18,24,8):RGB15(26,22,8));
+        worldVertex(x-width,y,height);worldVertex(x,y-2,height);
+        worldVertex(x+width,y,height);worldVertex(x,y+2,height);
     }
+    endPrimitive();
     glPolyFmt(POLY_ALPHA(31)|POLY_CULL_NONE|POLY_ID(0));
     if(fight || g->state==STATE_RESULT) {
         int species=gamePlayerSpecies(g),enemySpecies=gameEnemySpecies(g);
