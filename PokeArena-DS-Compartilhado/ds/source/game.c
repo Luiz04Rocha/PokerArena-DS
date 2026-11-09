@@ -407,7 +407,7 @@ static void updateProjectiles(Game *g,int playerOldX,int playerOldY,int enemyOld
     /* The final movement tick can still hit; expire only after collision checks. */
     for (int i = 0; i < PROJECTILE_CAP; ++i) {
         Projectile *p=&g->projectiles[i];
-        if(p->x<0||p->x>256*POS_SCALE||p->y<45*POS_SCALE||p->y>192*POS_SCALE)p->life=0;
+        if(p->x<0||p->x>256*POS_SCALE||p->y<(ARENA_TOP-4)*POS_SCALE||p->y>(ARENA_BOTTOM+2)*POS_SCALE)p->life=0;
         else decrement(&p->life);
     }
 }

@@ -29,7 +29,7 @@ void visualCameraStep(VisualCamera *c,int px,int py,int ex,int ey,bool fight,boo
         int fitY=172*256/(bottom-top);
         int fit=fitX<fitY?fitX:fitY;
         zoom=clamp(210*256/(separation+36),218,307);
-        zoom=clamp(zoom+clamp(ultimateTicks,0,12)*2,218,fit);
+        zoom=clamp(zoom+clamp(ultimateTicks,0,12)*2,fit<218?fit:218,fit);
         int marginX=102*256*256/zoom,marginY=86*256*256/zoom;
         x=clamp((px-128)*256+(ex-px)*weight,(right-128)*256-marginX,(left-128)*256+marginX);
         y=clamp((visualGroundY((py*3+ey)/4)-116)*256,(bottom-96)*256-marginY,(top-96)*256+marginY);

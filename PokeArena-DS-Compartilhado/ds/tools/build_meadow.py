@@ -10,7 +10,7 @@ from PIL import Image, ImageDraw
 ROOT = Path(__file__).resolve().parents[2]
 WIDTH, HEIGHT = 256, 128
 CENTER_X, CENTER_Y = 128, 120
-RIM_X, RIM_Y = 113, 76
+RIM_X, RIM_Y = 119, 80
 COLORS = [
     (44, 85, 70), (60, 111, 78), (79, 133, 86), (97, 150, 94),
     (111, 161, 98), (125, 169, 105), (143, 180, 115), (145, 163, 105),

@@ -113,14 +113,16 @@ void sceneCommitTextures(void) {
     if(REG_VCOUNT<192||REG_VCOUNT>=207){++sceneUploadLate;return;}
     uint8_t saved=VRAM_A_CR;
     vramSetBankA(VRAM_A_LCD);
-    for(int slot=0;slot<GROUND_TEXTURE;++slot) {
+    /* Finish both banks' actor frames before spending the window on effects. */
+    bool late=false;
+    for(int pass=0;pass<2 && !late;++pass) for(int slot=0;slot<GROUND_TEXTURE;++slot) {
         const uint16_t *data=pendingPixels[slot];
-        if(!data)continue;
-        if(REG_VCOUNT>=207){++sceneUploadLate;break;}
         int local=slot%DYNAMIC_TEXTURES;
         bool actor=local<ACTOR_COUNT;
+        if(!data || actor!=(pass==0))continue;
+        if(REG_VCOUNT>=207){++sceneUploadLate;late=true;break;}
         const uint16_t *pixels=actor?actorStage[slot/DYNAMIC_TEXTURES][local]:data;
-        if(textureMemory[slot])memcpy(textureMemory[slot],pixels,actor?2048:512);
+        if(textureMemory[slot])dmaCopy(pixels,textureMemory[slot],actor?2048:512);
         cachedPixels[slot]=data;pendingPixels[slot]=NULL;++sceneTextureUploads;
     }
     unsigned line=REG_VCOUNT;
@@ -141,8 +143,12 @@ static void bindActor(int id,const NativeAnim *anim,int index,int palette) {
     int slot=textureBank*DYNAMIC_TEXTURES+id;
     const uint16_t *begin=anim->pixels+anim->frameOffsets[index];
     const uint16_t *end=anim->pixels+anim->frameOffsets[index+1];
-    if(cachedPixels[slot]!=begin && !nativeDecodeSprite(begin,end,actorStage[textureBank][id]))
-        ++sceneTextureFailures;
+    if(cachedPixels[slot]!=begin) {
+        uint16_t *stage=actorStage[textureBank][id];
+        if(!nativeDecodeSprite(begin,end,stage)) ++sceneTextureFailures;
+        /* DMA reads RAM directly on the ARM9, outside its data cache. */
+        DC_FlushRange(stage,sizeof(actorStage[textureBank][id]));
+    }
     bindSprite(id,begin,palette);
 }
 static void billboard(int x,int y,int width,int height,int z) {
@@ -163,12 +169,12 @@ static void prop(int x,int y,int w,int h,int u,int v,int tw,int th) {
     glTexCoord2i(u,v+th);projectedVertex(left*256,bottom*256,z);endPrimitive();
 }
 static const int lanternX[]={31,225};
-enum { LANTERN_Y=47 };
+enum { LANTERN_Y=43 };
 static void sceneryProps(void) {
     glBindTexture(0,textures[GROUND_TEXTURE+2]);glColor(RGB15(31,31,31));
     const int fenceX[6]={22,52,82,174,204,234};
-    for(int i=0;i<6;++i)prop(fenceX[i],46,32,32,64,0,32,32);
-    prop(102,46,12,32,64,0,12,32);prop(254,46,12,32,64,0,12,32);
+    for(int i=0;i<6;++i)prop(fenceX[i],42,32,32,64,0,32,32);
+    prop(102,42,12,32,64,0,12,32);prop(254,42,12,32,64,0,12,32);
     for(int i=0;i<arenaPropCount;++i) {
         const ArenaProp *p=&arenaProps[i];
         if(p->kind==PROP_LOG) prop(p->x,p->y,p->width,p->height,0,32,64,32);
@@ -207,7 +213,7 @@ static void ground(void) {
 
 }
 typedef struct {int x,y,rx,ry;} Pond;
-static const Pond ponds[]={{19,207,20,14},{267,171,17,13}};
+static const Pond ponds[]={{19,212,20,14},{271,171,17,13}};
 static void pondBanks(void) {
     for(unsigned i=0;i<sizeof(ponds)/sizeof(ponds[0]);++i) {
         const Pond *p=&ponds[i];
@@ -656,6 +662,15 @@ void sceneDraw(const Game *g,const Game *old,int half,int displayTicks) {
         color(i%3?RGB15(18,24,8):RGB15(26,22,8));
         worldVertex(x-width,y,height);worldVertex(x,y-2,height);
         worldVertex(x+width,y,height);worldVertex(x,y+2,height);
+    }
+    for(int i=0;i<6;++i) {
+        int phase=(g->frameCounter+i*29u)%128;
+        if(phase<16 || phase>104) continue;
+        int x=(i&1?238:19)+sinLerp(phase*420+i*3010)/768;
+        int y=91+i*15, h=4+phase/8;
+        color(period==3?RGB15(28,27,11):RGB15(24,27,15));
+        worldVertex(x-1,y,h);worldVertex(x,y-1,h);
+        worldVertex(x+1,y,h);worldVertex(x,y+1,h);
     }
     endPrimitive();
     glPolyFmt(POLY_ALPHA(31)|POLY_CULL_NONE|POLY_ID(0));
