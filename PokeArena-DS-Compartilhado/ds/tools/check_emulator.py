@@ -559,6 +559,30 @@ def main():
         states['ultimate'] = shot('08-ultimate-por-toque.png')
         checks += ['held stylus A repeats', 'native touch B', 'native touch dodge', 'native touch ultimate']
         movie=[];attack_brightness=[]
+        charmander_clips=[]
+        charmander_moves=('brasas','pirotecnia','nitrocarga','lanca-chamas','fogo-draconico')
+        def attack_launch(capture_frames):
+            if not capture_frames:
+                run(3)
+                return []
+            frames=[]
+            for _ in range(3):
+                run(1)
+                frames.append(capture())
+            return frames
+
+        def capture_charmander_move(slot, before, frames):
+            # Pick an early frame with the most newly visible fire pixels in the arena.
+            box=(0,18,256,188)
+            baseline=before.crop(box).get_flattened_data()
+            def fire_pixels(frame):
+                return sum(r>=136 and r-b>=52 and r-g>=8 and
+                           max(abs(r-r0),abs(g-g0),abs(b-b0))>=24
+                           for (r,g,b),(r0,g0,b0) in zip(frame.crop(box).get_flattened_data(),baseline))
+            peak=max(frames[:12],key=fire_pixels)
+            peak.save(out/f'charmander-{slot+1}-{charmander_moves[slot]}.png')
+            charmander_clips.append((before,frames))
+
         def attack_frame():
             im=capture();top=im.crop((0,0,256,192))
             brightness=sum(ImageStat.Stat(top).mean)/3
@@ -581,8 +605,9 @@ def main():
             press(3);assert snapshot()['state']==2
             wait_for_fight()
             for slot,(x,y) in enumerate(((64,92),(192,92),(64,128),(192,128))):
+                before=capture() if pokemon==0 else None
                 cast=snapshot()['playerCastSerial'];rendered=metric('sceneRenderCount');logic=snapshot()['frameCounter']
-                pointer=(x,y);run(3);pointer=None
+                pointer=(x,y);charm_frames=attack_launch(before is not None);pointer=None
                 assert snapshot()['playerCastSerial']>cast,'Move did not start'
                 age=snapshot()['playerCastAge']*2
                 expected=[rush+(recover-rush)*t//12 if slot==2 else hit+t*3//2 for t in (age,age+1)]
@@ -592,7 +617,10 @@ def main():
                 for i in range(30):
                     run(1)
                     im=attack_frame()
-                    if i%2==0:movie.append(im)
+                    if i%2==0:
+                        movie.append(im)
+                        if before is not None: charm_frames.append(im)
+                if before is not None: capture_charmander_move(slot,before,charm_frames)
                 assert snapshot()['moveCooldowns'][slot]>0 or slot==0
                 renders=metric('sceneRenderCount')-rendered;logic_ticks=snapshot()['frameCounter']-logic
                 performance.append({'scenario':f'pokemon_{pokemon}_move_{slot}','display_frames':renders,'logic_ticks':logic_ticks,'emulated_frames':33})
@@ -605,14 +633,18 @@ def main():
             pointer=None;run(4)
             assert snapshot()['state']==2 and snapshot()['ultimateCharge']>=100,'Ultimate did not charge'
             base_zoom=camera_zoom();peak_zoom=base_zoom
-            pointer=(126,170);run(3);pointer=None
+            before=capture() if pokemon==0 else None
+            pointer=(126,170);charm_frames=attack_launch(before is not None);pointer=None
             age=snapshot()['playerCastAge']*2
             assert actor_pose(0)[3] in (hit+age*3//2,hit+(age+1)*3//2),'Ultimate pose out of sync'
             for i in range(42):
                 run(1)
                 peak_zoom=max(peak_zoom,camera_zoom())
                 im=attack_frame()
-                if i%2==0:movie.append(im)
+                if i%2==0:
+                    movie.append(im)
+                    if before is not None: charm_frames.append(im)
+            if before is not None: capture_charmander_move(4,before,charm_frames)
             assert snapshot()['lastAttack']==4 and snapshot()['ultimateCharge']<100
             states['ultimate_'+str(pokemon)]=shot(f'14-ultimate-{pokemon}.png')
             assert snapshot()['state']==2,'Gallery opponent defeated before the next character'
@@ -621,9 +653,14 @@ def main():
         checks.append('camera approaches during the ultimate')
         assert len({im.tobytes() for im in movie})>80,'Animations did not advance'
         movie[0].save(out/'combate-nativo.gif',save_all=True,append_images=movie[1:],duration=[30 if i%3<2 else 40 for i in range(len(movie))],loop=0,disposal=2)
+        gallery, gallery_times=[], []
+        for before, frames in charmander_clips:
+            gallery.extend([before,*frames])
+            gallery_times.extend([250]+[30]*3+[60]*(len(frames)-4)+[330])
+        gallery[0].save(out/'charmander.gif',save_all=True,append_images=gallery[1:],duration=gallery_times,loop=0,disposal=2)
         checks.append('all twenty animated moves including four ultimates in the native ROM')
         assert metric('sceneCharmanderFx')==31, f"Charmander effects mask {metric('sceneCharmanderFx'):05b}"
-        checks.append('all five Charmander fire signatures rendered')
+        checks.append('all five redesigned Charmander attacks rendered and captured individually')
         checks.append('all twenty casts show the expected PMD release or rush frame')
         checks.append(f'{len(attack_brightness)} consecutive attack display samples without blank/flat frames')
 
