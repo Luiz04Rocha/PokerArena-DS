@@ -36,6 +36,7 @@ typedef struct { unsigned tick; int x,y; bool visible; } StepDust;
 static StepDust stepDust[ACTOR_COUNT];
 static volatile unsigned sceneStepDustDraws;
 static volatile unsigned sceneIdleBreaths;
+static volatile unsigned sceneCharmanderFx;
 static VisualCamera camera;
 static unsigned sceneVertices;
 static unsigned scenePolygons,primitiveStart;
@@ -528,6 +529,11 @@ static void impactRing(const VisualImpact *impact,int slot,int age) {
     }
     endPrimitive();
 }
+/* Small warm fragments on the ground or behind the attack, without screen flashes. */
+static void fireEmber(int x,int y,int height,int size) {
+    worldVertex(x-size,y,height);worldVertex(x,y-size,height+1);
+    worldVertex(x+size,y,height);worldVertex(x,y+size,height-1);
+}
 static void drawCast(const VisualCast *v,int slot) {
     if(!v->ticks) return;
     static const int dx[8]={0,181,256,181,0,-181,-256,-181};
@@ -538,6 +544,7 @@ static void drawCast(const VisualCast *v,int slot) {
     glPolyFmt(POLY_ALPHA(alpha)|POLY_CULL_NONE|POLY_ID(8+slot));
     fxBind(slot,v->style,v->facing,frame);
     int x=v->originX/POS_SCALE,y=v->originY/POS_SCALE;
+    bool charmander=v->species==0;
     if(v->kind==MOVE_DASH) {
         int head=age<v->motionTicks*2?age:v->motionTicks*2;
         for(int i=0;i<4;++i) {
@@ -548,6 +555,18 @@ static void drawCast(const VisualCast *v,int slot) {
             int py=(v->originY+(v->y-v->originY)*progress/256)/POS_SCALE;
             effectAt(px,py,18-i*2,10);
         }
+        if(charmander && v->style==FX_FIRE_DASH) {
+            noTexture();glColor(RGB15(31,19,5));
+            beginPrimitive(GL_QUADS);
+            for(int i=0;i<3;++i) {
+                int progress=gameDashProgress(head-i*2);
+                int px=(v->originX+(v->x-v->originX)*progress/256)/POS_SCALE;
+                int py=(v->originY+(v->y-v->originY)*progress/256)/POS_SCALE;
+                fireEmber(px+dy[v->facing]*(i-1)/128,py-dx[v->facing]*(i-1)/128,4+i,2);
+            }
+            endPrimitive();
+            sceneCharmanderFx|=4;
+        }
     } else if(v->kind==MOVE_AREA) {
         /* Damage is immediate, so the first ring already shows the actual range. */
         int radius=v->range+age*5/total;
@@ -557,7 +576,19 @@ static void drawCast(const VisualCast *v,int slot) {
             worldVertex(x+c*radius/4096,y+s*radius/4096,3);
             worldVertex(x+c*(radius-2)/4096,y+s*(radius-2)/4096,3);
         }
-        endPrimitive();fxBind(slot,v->style,v->facing,frame);
+        endPrimitive();
+        if(charmander && v->style==FX_FIRE_BURST) {
+            beginPrimitive(GL_QUADS);
+            for(int i=0;i<12;++i) {
+                int angle=i*32768/12+age*140;
+                int r=radius-(i%2?9:3);
+                glColor(i%2?RGB15(31,10,3):RGB15(31,25,8));
+                fireEmber(x+cosLerp(angle)*r/4096,y+sinLerp(angle)*r/4096,4+age/2+i%3,2);
+            }
+            endPrimitive();
+            sceneCharmanderFx|=2;
+        }
+        fxBind(slot,v->style,v->facing,frame);
         for(int i=0;i<6;++i) {int a=i*32768/6;effectAt(x+cosLerp(a)*radius/4096,y+sinLerp(a)*radius/4096,16,8);}
     } else {
         if(v->kind==MOVE_MELEE) {
@@ -566,6 +597,18 @@ static void drawCast(const VisualCast *v,int slot) {
             int height=14;
             attackOrigin(v->species,v->facing,&x,&height,8);
             effectAt(x,y,16,height);
+            if(charmander && (v->style==FX_FIRE_ULT || v->style==FX_FIRE_BEAM || v->style==FX_FIRE_BOLT)) {
+                int sparks=v->style==FX_FIRE_ULT?5:v->style==FX_FIRE_BEAM?3:2;
+                noTexture();glColor(RGB15(31,23,7));
+                beginPrimitive(GL_QUADS);
+                for(int i=0;i<sparks;++i) {
+                    int angle=i*32768/sparks;
+                    int r=3+age/2;
+                    fireEmber(x+cosLerp(angle)*r/4096,y+sinLerp(angle)*r/4096,height,2);
+                }
+                endPrimitive();
+                sceneCharmanderFx|=v->style==FX_FIRE_ULT?16:v->style==FX_FIRE_BEAM?8:1;
+            }
         }
     }
 }
@@ -786,6 +829,21 @@ void sceneDraw(const Game *g,const Game *old,int half,int displayTicks) {
             if(p->ultimate||p->style%5==3||p->style==FX_SOLAR) {
                 glPolyFmt(POLY_ALPHA(10)|POLY_CULL_NONE|POLY_ID(4+i));
                 for(int j=1;j<=2;++j)effectAt(x-p->vx*j/(POS_SCALE*2),y-p->vy*j/(POS_SCALE*2),18-j*3,height);
+            }
+            if(p->species==0 && (p->style==FX_FIRE_BOLT||p->style==FX_FIRE_BEAM||p->style==FX_FIRE_ULT)) {
+                bool stream=p->style!=FX_FIRE_BOLT;
+                noTexture();
+                glPolyFmt(POLY_ALPHA(16)|POLY_CULL_NONE|POLY_ID(4+i));
+                beginPrimitive(GL_QUADS);
+                for(int j=1;j<=(stream?4:2);++j) {
+                    int side=(j&1?1:-1)*(stream?3:1);
+                    int px=x-p->vx*j/(POS_SCALE*2)+cosLerp(facing*4096)*side/4096;
+                    int py=y-p->vy*j/(POS_SCALE*2)-sinLerp(facing*4096)*side/4096;
+                    glColor(j&1?RGB15(31,24,7):RGB15(31,11,3));
+                    fireEmber(px,py,height-j/2,stream?2:1);
+                }
+                endPrimitive();
+                sceneCharmanderFx|=stream?(p->ultimate?16:8):1;
             }
         }
         for(int i=0;i<CAST_CAP;++i)drawCast(&g->castEvents[i],CAST_TEXTURE+i);

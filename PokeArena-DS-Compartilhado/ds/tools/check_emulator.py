@@ -622,6 +622,8 @@ def main():
         assert len({im.tobytes() for im in movie})>80,'Animations did not advance'
         movie[0].save(out/'combate-nativo.gif',save_all=True,append_images=movie[1:],duration=[30 if i%3<2 else 40 for i in range(len(movie))],loop=0,disposal=2)
         checks.append('all twenty animated moves including four ultimates in the native ROM')
+        assert metric('sceneCharmanderFx')==31, f"Charmander effects mask {metric('sceneCharmanderFx'):05b}"
+        checks.append('all five Charmander fire signatures rendered')
         checks.append('all twenty casts show the expected PMD release or rush frame')
         checks.append(f'{len(attack_brightness)} consecutive attack display samples without blank/flat frames')
 
