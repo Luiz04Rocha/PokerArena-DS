@@ -40,7 +40,7 @@ def main():
          '-Wl,--start-group','-lnds9','-lc','-Wl,--end-group','-o',elf])
     rom=root/'arena_dupla_dsi.nds'
     run([ndstool,'-c',rom,'-9',elf,'-7',sdk/'sys/arm7/main_core/arm7_maxmod.elf',
-         '-b',sdk/'sys/icon.gif','PokeArena DS v0.33;DS / DSi - prototipo;Luiz'])
+         '-b',sdk/'sys/icon.gif','PokeArena DS v0.34;DS / DSi - prototipo;Luiz'])
     print('ROM gerada:',rom,rom.stat().st_size,'bytes')
 
 if __name__=='__main__': main()

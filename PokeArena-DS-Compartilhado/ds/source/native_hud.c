@@ -824,7 +824,7 @@ static void battle(const Game *g) {
     bool ultimate=g->attackAnim && g->lastAttack==4;
     bool charged=g->ultimateCharge==100;
     menuCard(ult,0,charged||ultimate);
-    centeredLabel(ult,7,"ULTIMATE",charged?YELLOW:WHITE,true);
+    centeredLabel(ult,7,gameStage(g)>0?gameUltimateDef(g)->name:"ULTIMATE",charged?YELLOW:WHITE,true);
     if(charged) strcpy(s,"R  PRONTO");
     else snprintf(s,sizeof(s),"R  %d%%",g->ultimateCharge);
     centeredLabel(ult,18,s,charged?YELLOW:WHITE,true);

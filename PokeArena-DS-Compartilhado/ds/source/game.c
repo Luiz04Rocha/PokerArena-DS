@@ -211,7 +211,7 @@ void gameAttack(Game *g, int slot) {
 }
 void gameUseUltimate(Game *g) {
     if (!canAct(g) || g->ultimateCharge < ULT_MAX || g->actionLock > 0 || g->roundDelay > 0 || g->dodgeTimer > 0 || g->dashes[0].ticks>0) return;
-    const MoveDef *move = &starters[g->selectedPokemon].ultimate;
+    const MoveDef *move = gameUltimateDef(g);
     if (!fireMove(g,true,move,move->damage + (gameStage(g)*8),true)) return;
     g->ultimateCharge = 0;
     g->actionLock = 10;
@@ -329,7 +329,7 @@ static bool fireMove(Game *g, bool mine, const MoveDef *move, int damage, bool u
 }
 bool gameFire(Game *g, bool mine, int damage, bool ultimate) {
     static const MoveDef cpuShot = {"CPU",MOVE_PROJECTILE,0,0,224,4,0,ELEMENT_NORMAL};
-    const MoveDef *move = mine ? (ultimate ? &starters[g->selectedPokemon].ultimate : &starters[g->selectedPokemon].moves[0]) : &cpuShot;
+    const MoveDef *move = mine ? (ultimate ? gameUltimateDef(g) : gameMoveDef(g,0)) : &cpuShot;
     /* This utility is for projectiles; a melee basic uses the generic shot profile. */
     if (move->kind != MOVE_PROJECTILE) move = &cpuShot;
     return fireMove(g,mine,move,damage,ultimate);

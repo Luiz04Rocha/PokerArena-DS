@@ -303,10 +303,27 @@ static void testMoveDataAndHud(void) {
             if (m->kind == MOVE_PROJECTILE) assert(m->speed > 0);
             if (m->kind == MOVE_DASH) assert(m->dashDistance > 0);
         }
-        int damage = gameAttackDamage(&g,0);
-        g.evolutionTicks = EVOLUTION_TICKS;
-        gameEvolve(&g);
-        assert(gameAttackDamage(&g,0) == damage+3);
+        const char *baseNames[MOVE_COUNT];
+        for(int slot=0;slot<MOVE_COUNT;++slot) baseNames[slot]=gameMoveDef(&g,slot)->name;
+        const char *baseUltimate=gameUltimateDef(&g)->name;
+        const char *previousNames[MOVE_COUNT];
+        memcpy(previousNames,baseNames,sizeof(previousNames));
+        const char *previousUltimate=baseUltimate;
+        for(int stage=1;stage<=gameFinalStage(&g);++stage) {
+            g.evolutionTicks=stage==1?EVOLUTION_TICKS:900;
+            gameEvolve(&g);
+            assert(gameStage(&g)==stage);
+            for(int slot=0;slot<MOVE_COUNT;++slot) {
+                const MoveDef *move=gameMoveDef(&g,slot);
+                assert(strcmp(move->name,baseNames[slot]) && strcmp(move->name,previousNames[slot]));
+                assert(gameAttackDamage(&g,slot)==move->damage+starters[pokemon].attackBonus+stage*3);
+                previousNames[slot]=move->name;
+            }
+            const MoveDef *ultimate=gameUltimateDef(&g);
+            assert(strcmp(ultimate->name,baseUltimate) && strcmp(ultimate->name,previousUltimate));
+            assert(ultimate->kind==MOVE_PROJECTILE && ultimate->speed>0);
+            previousUltimate=ultimate->name;
+        }
         g.moveCooldowns[3] = 37;
         TextScreen top,bottom;
         screensBuild(&g,&top,&bottom);

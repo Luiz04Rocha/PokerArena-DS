@@ -83,6 +83,7 @@ typedef struct {
 extern const PokemonDef starters[STARTER_COUNT];
 extern const uint16_t elementColors[ELEMENT_COUNT];
 const MoveDef *gameMoveDef(const Game *g, int slot);
+const MoveDef *gameUltimateDef(const Game *g);
 int gameEnemySpecies(const Game *g);
 int gameRivalSpecies(const Game *g);
 bool gameAimsAtRival(const Game *g);
