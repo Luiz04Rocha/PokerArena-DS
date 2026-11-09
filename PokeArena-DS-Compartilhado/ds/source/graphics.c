@@ -10,7 +10,7 @@ void nativeHudPresent(u16 *bottom,u16 *overlay);
 void sceneCommitTextures(void);
 static int hudBg,overlayBg;
 int sceneLightingChoice(void);
-static int previousHud[29];
+static int previousHud[32];
 static bool hudValid;
 static volatile unsigned graphicsSceneUsec,graphicsHudUsec,graphicsMaxUsec;
 static volatile unsigned graphicsEvenUsec,graphicsOddUsec,graphicsEvenHud;
@@ -27,7 +27,7 @@ void graphicsDraw(const Game *g,const Game *previous,int half,int displayTicks) 
     cpuStartTiming(0);
     sceneDraw(g,previous,half,displayTicks);
     graphicsSceneUsec=timerTicks2usec(cpuGetTiming());
-    int stamp[29]={(int)g->state,(int)g->mode,g->selectedPokemon,g->opponentPokemon,g->menuCursor,g->muted,
+    int stamp[32]={(int)g->state,(int)g->mode,g->selectedPokemon,g->opponentPokemon,g->menuCursor,g->muted,
         gameStage(g),g->playerHp,g->enemyHp,g->enemyMaxHp,g->ultimateCharge,gameEvolutionPercent(g),
         gameSecondsLeft(g),g->wave,g->partnerHp,g->dodgeTimer>0,g->dodgeCooldown>0,g->roundDelay>0,g->cpuWindup>0,(int)g->result};
     for(int i=0;i<4;++i)stamp[20+i]=(g->moveCooldowns[i]*10+GAME_HZ-1)/GAME_HZ;
@@ -36,6 +36,9 @@ void graphicsDraw(const Game *g,const Game *previous,int half,int displayTicks) 
     stamp[26]=g->state==STATE_FIGHT && g->frameCounter<15;
     stamp[27]=g->attackAnim?g->lastAttack:-1;
     stamp[28]=g->rival.hp;
+    stamp[29]=g->duelRound;
+    stamp[30]=g->playerRounds;
+    stamp[31]=g->rivalRounds;
     if(!hudValid||memcmp(previousHud,stamp,sizeof(stamp))) {
         nativeHudDraw(g);
         memcpy(previousHud,stamp,sizeof(stamp));hudValid=true;

@@ -56,6 +56,8 @@ typedef struct {
     bool muted;
     int playerHp, partnerHp, enemyHp, enemyMaxHp, ultimateCharge;
     int wave, fightTicks, moveCooldowns[MOVE_COUNT], actionLock, roundDelay, enemyCooldown, regenDelay;
+    int duelRound, playerRounds, rivalRounds;
+    bool duelContinuation;
     int introTicks;
     int bufferedMove, bufferTicks;
     int dodgeTimer, dodgeCooldown, enemyGuard, partnerCooldown, evolutionTicks;
@@ -99,6 +101,7 @@ typedef struct { int hp, speed, distance, cooldown; } CpuProfile;
 extern const CpuProfile cpuProfiles[STARTER_COUNT];
 void gameInit(Game *g);
 void gameStart(Game *g);
+bool gameDuelContinues(const Game *g);
 void gameUpdate(Game *g, uint32_t down);
 void gameUpdateInput(Game *g, uint32_t down, uint32_t held);
 void gameAttack(Game *g, int slot);

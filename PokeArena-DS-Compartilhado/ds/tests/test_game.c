@@ -32,7 +32,14 @@ static void testWaves(void) {
                 if (wave < count) {
                     assert(g.state == STATE_FIGHT && g.wave == wave + 1 && g.enemyHp > 0);
                     assert(g.enemyGuard == 0 && g.enemyCooldown > 0);
-                } else assert(g.state == STATE_RESULT && g.result == RESULT_WIN);
+                } else {
+                    assert(g.state == STATE_RESULT && g.result == RESULT_WIN);
+                    if(gameIsHorde(g.mode)) {
+                        assert(!gameDuelContinues(&g) && !g.duelRound && !g.playerRounds && !g.rivalRounds);
+                        gameUpdate(&g,IN_START);
+                        assert(g.state==STATE_FIGHT && g.wave==1 && !g.duelRound);
+                    }
+                }
             }
         }
     }
@@ -109,6 +116,60 @@ static void testResultsAndClock(void) {
     g.fightTicks = 1;
     gameUpdate(&g, 0);
     assert(g.state == STATE_RESULT && g.result == RESULT_TIME && gameSecondsLeft(&g) == 0);
+    assert(gameDuelContinues(&g) && !g.playerRounds && !g.rivalRounds);
+    gameUpdate(&g,IN_START);
+    assert(g.state==STATE_FIGHT && g.duelRound==1 && g.introTicks==INTRO_TICKS);
+}
+static void testDuelRounds(void) {
+    Game g=fight(MODE_VS);
+    assert(g.duelRound==1 && !g.playerRounds && !g.rivalRounds);
+    g.evolutionTicks=EVOLUTION_TICKS;
+    gameEvolve(&g);
+    assert(gameStage(&g)==1);
+    g.evolutionTicks=123;
+    g.playerHp=gameMaxHp(&g)-10;
+    g.enemyHp=1;
+    g.enemyX=g.playerX;
+    g.enemyY=g.playerY;
+    gameAttack(&g,1);
+    assert(g.state==STATE_RESULT && g.result==RESULT_WIN && g.playerRounds==1 && gameDuelContinues(&g));
+
+    gameUpdate(&g,IN_START);
+    assert(g.state==STATE_FIGHT && g.duelRound==2 && g.introTicks==INTRO_TICKS);
+    assert(g.playerRounds==1 && !g.rivalRounds && g.duelContinuation);
+    assert(gameStage(&g)==1 && g.evolutionTicks==123 && g.playerHp==gameMaxHp(&g));
+    assert(g.enemyHp==g.enemyMaxHp && !g.moveCooldowns[1] && !g.ultimateCharge);
+    while(g.introTicks) gameUpdate(&g,0);
+    g.fightTicks=1;
+    g.enemyHp=1;
+    gameUpdate(&g,0);
+    assert(g.state==STATE_RESULT && g.result==RESULT_WIN && g.playerRounds==2 && !gameDuelContinues(&g));
+    gameUpdate(&g,IN_START);
+    assert(g.duelRound==1 && !g.playerRounds && !g.rivalRounds && !g.duelContinuation && !gameStage(&g));
+
+    g=fight(MODE_TEAM);
+    g.playerHp=0;
+    gameUpdate(&g,0);
+    assert(g.state==STATE_RESULT && g.rivalRounds==1 && gameDuelContinues(&g));
+    gameUpdate(&g,IN_START);
+    assert(g.duelRound==2 && g.partnerHp==PARTNER_HP && g.rival.hp==TEAM_RIVAL_HP);
+    while(g.introTicks) gameUpdate(&g,0);
+    g.fightTicks=1;
+    g.rival.hp=0;
+    gameUpdate(&g,0);
+    assert(g.state==STATE_RESULT && g.playerRounds==1 && g.rivalRounds==1 && gameDuelContinues(&g));
+    gameUpdate(&g,IN_START);
+    assert(g.state==STATE_FIGHT && g.duelRound==3 && g.playerRounds==1 && g.rivalRounds==1);
+    while(g.introTicks) gameUpdate(&g,0);
+    g.fightTicks=1;
+    gameUpdate(&g,0);
+    assert(g.state==STATE_RESULT && g.result==RESULT_TIME && gameDuelContinues(&g));
+    gameUpdate(&g,IN_START);
+    assert(g.duelRound==3 && g.playerRounds==1 && g.rivalRounds==1);
+    while(g.introTicks) gameUpdate(&g,0);
+    g.playerHp=0;
+    gameUpdate(&g,0);
+    assert(g.state==STATE_RESULT && g.rivalRounds==2 && !gameDuelContinues(&g));
 }
 static void testCombat(void) {
     Game g = fight(MODE_SOLO);
@@ -667,6 +728,7 @@ int main(void) {
     testDodgeDirection();
     testMatchOpening();
     testTeamDuel();
+    testDuelRounds();
     testWaveBreakAndTactics();
     testSolidCover();testPoseTransitions();
     testSmoothDashAndSweptHits();testEffectsBufferAndCamera();

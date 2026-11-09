@@ -425,7 +425,13 @@ def main():
             (out/'flash-probe.json').write_text(json.dumps(report,indent=2))
             print('Flash probe:',[(i,brightness[i],changes[i]) for i in worst],flush=True);return
         rendered=metric('sceneRenderCount');logic=snapshot()['frameCounter'];uploads=metric('sceneTextureUploads')
-        held.add(7);run(60);held.remove(7)
+        dust_draws=metric('sceneStepDustDraws')
+        walking=[]
+        held.add(7)
+        for _ in range(20):
+            run(3)
+            walking.append(capture().crop((0,0,256,192)))
+        held.remove(7)
         render_rate=metric('sceneRenderCount')-rendered;logic_rate=snapshot()['frameCounter']-logic
         print('Frames in 60 VBlanks:',render_rate,'logic:',logic_rate,'texture uploads:',metric('sceneTextureUploads')-uploads,flush=True)
         print('Timing us:',{n:metric(n) for n in ('graphicsSceneUsec','graphicsHudUsec','graphicsMaxUsec','graphicsEvenUsec','graphicsOddUsec','graphicsEvenHud')},flush=True)
@@ -433,7 +439,8 @@ def main():
         checks.append('60 display updates with 30 logic updates per second')
         assert metric('battlePeriod')==first_period and metric('sceneRandomSelections')==duel_lighting_count
         performance.append({'scenario':'movement','display_frames':render_rate,'logic_ticks':logic_rate,'emulated_frames':60})
-        assert metric('sceneStepDustDraws')>0,'Walking dust was not rendered'
+        assert metric('sceneStepDustDraws')>dust_draws,'Walking dust was not rendered'
+        walking[0].save(out/'36-poeira-dos-passos.gif',save_all=True,append_images=walking[1:],duration=50,loop=0)
         assert metric('sceneIdleBreaths')>0,'Idle breathing was not rendered'
         checks.append('idle breathing rendered with normal movement and combat')
         checks.append('subtle step dust rendered during normal movement')
@@ -708,9 +715,16 @@ def main():
         assert metric('sceneCelebrations')>0 and metric('sceneTears')>0,'Result effects did not render'
         states['celebration']=shot('21-vitoria-e-lagrimas.png')
         capture().crop((0,192,256,384)).save(out/'27-menu-resultado.png')
+        round_result=snapshot()
+        assert round_result['duelRound']==1 and round_result['playerRounds']+round_result['rivalRounds']==1
+        lighting_draws=metric('sceneRandomSelections')
         touch(128,116)
         assert snapshot()['state']==2 and snapshot()['introTicks']>60
-        checks += ['animated outcome and rematch countdown', 'music clock freezes during pause']
+        assert snapshot()['duelRound']==2
+        assert all(snapshot()[k]==round_result[k] for k in ('playerRounds','rivalRounds','evolutionStage','evolutionTicks'))
+        assert metric('sceneRandomSelections')==lighting_draws
+        states['round_two']=shot('35-round-2.png')
+        checks += ['animated outcome and next round by touch with score, form and lighting retained', 'music clock freezes during pause']
         wait_for_fight()
         start_x=snapshot()['playerX']
         held.add(6);run(18)

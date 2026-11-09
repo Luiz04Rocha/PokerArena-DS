@@ -213,21 +213,22 @@ static void teamMarker(int x,int y,bool allied) {
 }
 static void walkingDust(int id,unsigned tick,bool walking,int x,int y,int oldX,int oldY) {
     StepDust *dust=&stepDust[id];
-    if(walking && (x!=oldX || y!=oldY) && (tick+id*3u)%9==0 &&
+    if(walking && (x!=oldX || y!=oldY) && (tick+id*3u)%8==0 &&
        (!dust->visible || dust->tick!=tick)) {
-        *dust=(StepDust){tick,oldX/POS_SCALE-2*((x>oldX)-(x<oldX)),
-                         oldY/POS_SCALE-2*((y>oldY)-(y<oldY)),true};
+        *dust=(StepDust){tick,oldX/POS_SCALE-4*((x>oldX)-(x<oldX)),
+                         oldY/POS_SCALE-4*((y>oldY)-(y<oldY)),true};
     }
     unsigned age=tick-dust->tick;
-    if(!dust->visible || age>=7) return;
+    if(!dust->visible || age>=8) return;
     noTexture();
-    glPolyFmt(POLY_ALPHA(13-age)|POLY_CULL_NONE|POLY_ID(28+id));
-    color(RGB15(24,20,13));
+    glPolyFmt(POLY_ALPHA(23-age*2)|POLY_CULL_NONE|POLY_ID(28+id));
     beginPrimitive(GL_QUADS);
-    for(int i=0;i<2;++i) {
-        int px=dust->x+(i?2:-2),py=dust->y+i, h=2+age/3+i;
-        worldVertex(px-1,py,h);worldVertex(px,py-1,h);
-        worldVertex(px+1,py,h);worldVertex(px,py+1,h);
+    for(int i=0;i<3;++i) {
+        int px=dust->x+(i-1)*(3+age/3),py=dust->y+(i==1?2:0);
+        int h=3+age/2+i%2,r=i==1?2:1;
+        color(i==1?RGB15(30,24,15):RGB15(27,21,13));
+        worldVertex(px-r,py,h);worldVertex(px,py-r,h+1);
+        worldVertex(px+r,py,h);worldVertex(px,py+r,h-1);
     }
     endPrimitive();
     ++sceneStepDustDraws;
@@ -404,7 +405,8 @@ static void actor(int id,int species,int requested,int facing,uint32_t serial,in
         }
     }
     const NativeAnim *a=&nativeSpecies[species].anim[anim];
-    int frame=visualFrame(a->durations,a->frames,elapsed,loop);
+    /* Idle sheets can shift the feet. In combat, keep their stance and animate the body. */
+    int frame=anim==NATIVE_IDLE && !reaction && !previewSize?0:visualFrame(a->durations,a->frames,elapsed,loop);
     int index=facing*a->frames+frame;
     const int8_t *anchor=a->anchors?a->anchors+4*index:NULL;
     if(anim==NATIVE_CELEBRATE && anchor) {
@@ -744,7 +746,7 @@ void sceneDraw(const Game *g,const Game *old,int half,int displayTicks) {
     sceneVertices=scenePolygons=0;
     ++sceneRenderCount;textureBank^=1;
     bool newBattle=g->state==STATE_FIGHT&&previousState!=STATE_FIGHT&&previousState!=STATE_PAUSE;
-    if(newBattle) {
+    if(newBattle && !g->duelContinuation) {
         lightingSeed^=sceneRenderCount*747796405u+(uint32_t)(g->selectedPokemon+1)*2891336453u;
         battlePeriod=visualRandomPeriod(&lightingSeed);++sceneRandomSelections;
     }

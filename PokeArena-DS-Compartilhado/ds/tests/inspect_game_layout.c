@@ -22,5 +22,6 @@ const LayoutRecord arenaLayout[] __attribute__((section(".arena_layout"),used)) 
     ,{"rivalHp",offsetof(Game,rival)+offsetof(SupportRival,hp),sizeof(int)}
     ,{"rivalAttacks",offsetof(Game,rival)+offsetof(SupportRival,attackSerial),sizeof(uint32_t)}
     ,FIELD(partnerHp)
+    ,FIELD(duelRound), FIELD(playerRounds), FIELD(rivalRounds)
 #undef FIELD
 };

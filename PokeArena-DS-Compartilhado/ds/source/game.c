@@ -94,6 +94,7 @@ void gameStart(Game *g) {
     g->partnerHp = mode == MODE_DUO || mode == MODE_TEAM ? PARTNER_HP : 0;
     g->partnerCooldown = 45;
     g->wave = 1;
+    if(!gameIsHorde(mode)) g->duelRound=1;
     g->enemyMaxHp = enemyMaxHp(g);
     g->enemyHp = g->enemyMaxHp;
     g->enemyCooldown = 30;
@@ -108,6 +109,24 @@ static void startPresentedFight(Game *g) {
     gameStart(g);
     g->introTicks=INTRO_TICKS;
     soundEvent(g,8);
+}
+bool gameDuelContinues(const Game *g) {
+    return g->state==STATE_RESULT && !gameIsHorde(g->mode) &&
+           g->playerRounds<2 && g->rivalRounds<2 && (g->duelRound<3 || g->result==RESULT_TIME);
+}
+static void nextDuelRound(Game *g) {
+    int round=g->duelRound+(g->result!=RESULT_TIME);
+    int wins=g->playerRounds,losses=g->rivalRounds;
+    int stage=gameStage(g),progress=g->evolutionTicks;
+    startPresentedFight(g);
+    g->duelRound=round;
+    g->playerRounds=wins;
+    g->rivalRounds=losses;
+    g->duelContinuation=true;
+    g->evolutionStage=stage;
+    g->evolved=stage>0;
+    g->evolutionTicks=progress;
+    g->playerHp=gameMaxHp(g);
 }
 static bool inRange(int ax, int ay, int bx, int by, int radius) {
     int dx = (ax - bx) / POS_SCALE, dy = (ay - by) / POS_SCALE;
@@ -134,6 +153,20 @@ static bool canAct(const Game *g) {
     return g->state == STATE_FIGHT && !g->introTicks && g->playerHp > 0 && (g->enemyHp > 0 || g->rival.hp > 0);
 }
 static void finish(Game *g, Result result) {
+    if(!gameIsHorde(g->mode)) {
+        if(result==RESULT_TIME) {
+            int playerHp=g->playerHp,playerMax=gameMaxHp(g);
+            int rivalHp=g->enemyHp,rivalMax=g->enemyMaxHp;
+            if(g->mode==MODE_TEAM) {
+                playerHp+=g->partnerHp;playerMax+=PARTNER_HP;
+                rivalHp+=g->rival.hp;rivalMax+=TEAM_RIVAL_HP;
+            }
+            int lead=playerHp*rivalMax-rivalHp*playerMax;
+            if(lead) result=lead>0?RESULT_WIN:RESULT_KO;
+        }
+        if(result==RESULT_WIN) ++g->playerRounds;
+        if(result==RESULT_KO) ++g->rivalRounds;
+    }
     g->result = result;
     g->state = STATE_RESULT;
     soundEvent(g,result==RESULT_WIN ? 6 : 7);
@@ -664,7 +697,10 @@ void gameUpdateInput(Game *g, uint32_t down, uint32_t held) {
     }
     if (g->state == STATE_RESULT) {
         if (down & IN_B) {g->menuCursor=TITLE_PLAY;g->state=STATE_TITLE;}
-        else if (down & IN_START) startPresentedFight(g);
+        else if (down & IN_START) {
+            if(gameDuelContinues(g)) nextDuelRound(g);
+            else startPresentedFight(g);
+        }
         return;
     }
     if (g->state == STATE_PAUSE) {

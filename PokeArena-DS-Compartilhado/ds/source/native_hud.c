@@ -666,11 +666,11 @@ static void titleCover(int firstRow,unsigned ticks) {
     center(y+3,"TOQUE PARA COME\xC7" "AR",TITLE_PULSE+level,1);
 }
 static void matchup(const Game *g) {
-    int species[2]={g->selectedPokemon,gameEnemySpecies(g)};
+    int species[2]={gamePlayerSpecies(g),gameEnemySpecies(g)};
     menuLandscape();
     menuHeader(gameModeName(g),1);
     for(int i=0;i<2;++i) {
-        const PokemonDef *mon=&starters[species[i]];
+        const PokemonDef *mon=&starters[i?species[i]:g->selectedPokemon];
         int accent=48+mon->moves[0].element;
         HudButton card={i?149:7,34,100,83,0};
         commandCard(&card,HUD_SURFACE,accent,HUD_EDGE);
@@ -679,7 +679,7 @@ static void matchup(const Game *g) {
             menuPortrait(species[i],card.x+16,46,30,accent);
             menuPortrait(support,card.x+58,54,14,48+starters[support].moves[0].element);
         } else menuPortrait(species[i],card.x+35,46,30,accent);
-        centeredLabel(&card,50,mon->name,WHITE,false);
+        centeredLabel(&card,50,i?mon->name:gamePlayerName(g),WHITE,false);
         rect(card.x+3,97,94,16,MENU_PLATE);
         const char *role=g->mode==MODE_TEAM?(i?"DUPLA RIVAL":"SUA DUPLA"):(i?"RIVAL":"LIDER");
         centeredLabel(&card,68,role,accent,false);
@@ -687,17 +687,30 @@ static void matchup(const Game *g) {
     panel(111,59,34,26,MENU_GOLD_DARK,HUD_INK);
     center(67,"VS",YELLOW,1);
     panel(28,124,200,23,HUD_EDGE,HUD_INK);
-    if(g->mode==MODE_DUO || g->mode==MODE_TEAM) {
+    if(!gameIsHorde(g->mode)) {
+        char score[32];
+        snprintf(score,sizeof(score),"ROUND %d   VOCE %d-%d CPU",g->duelRound,g->playerRounds,g->rivalRounds);
+        center(g->mode==MODE_TEAM?128:132,score,CYAN,1);
+        if(g->mode==MODE_TEAM) {
+            char partner[40];
+            snprintf(partner,sizeof(partner),"PARCEIRO: %s",starters[(g->selectedPokemon+1)%STARTER_COUNT].name);
+            center(138,partner,MUTED,1);
+        }
+    } else if(g->mode==MODE_DUO) {
         char partner[40];
         snprintf(partner,sizeof(partner),"PARCEIRO: %s",starters[(g->selectedPokemon+1)%STARTER_COUNT].name);
         center(132,partner,CYAN,1);
-    } else center(132,gameIsHorde(g->mode)?gameWaveName(g):"PREPARE-SE",CYAN,1);
+    } else center(132,gameWaveName(g),CYAN,1);
     const HudButton *pause=&hudButtons[7];
     commandCard(pause,HUD_SURFACE,HUD_EDGE,HUD_INK);
     centeredLabel(pause,8,"PAUSA",WHITE,false);
     centeredLabel(pause,21,"START",MUTED,false);
 }
 static const char *resultLabel(const Game *g) {
+    if(!gameIsHorde(g->mode) && gameDuelContinues(g)) {
+        if(g->result==RESULT_TIME) return "EMPATE";
+        return g->result==RESULT_WIN?"ROUND VENCIDO":"ROUND PERDIDO";
+    }
     return g->result==RESULT_WIN?"VITORIA!":g->result==RESULT_TIME?"TEMPO ESGOTADO":"DERROTA";
 }
 static void actionMenuCard(const HudButton *b,const char *title,const char *key,bool primary) {
@@ -724,6 +737,7 @@ static void pauseMenu(void) {
 }
 static void resultMenu(const Game *g) {
     bool won=g->result==RESULT_WIN;
+    bool more=gameDuelContinues(g);
     int accent=won?YELLOW:g->result==RESULT_TIME?CYAN:MUTED;
     menuLandscape();
     menuHeader(resultLabel(g),2);
@@ -731,20 +745,24 @@ static void resultMenu(const Game *g) {
     menuPortrait(gamePlayerSpecies(g),31,45,30,accent);
     text(72,42,"LIDER",MUTED,1);
     text(72,54,gamePlayerName(g),WHITE,1);
-    text(72,69,gameModeName(g),MUTED,1);
     if(gameIsHorde(g->mode)) {
+        text(72,69,gameModeName(g),MUTED,1);
         char wave[16];
         snprintf(wave,sizeof(wave),"ONDA %d/%d",g->wave,WAVE_COUNT);
         textRight(224,69,wave,WHITE);
+    } else {
+        char score[32];
+        snprintf(score,sizeof(score),"ROUND %d   VOCE %d-%d CPU",g->duelRound,g->playerRounds,g->rivalRounds);
+        text(72,69,score,CYAN,1);
     }
-    if(won) {
+    if(won && !more) {
         rect(211,40,3,19,MENU_GOLD_DARK);
         rect(205,45,15,7,MENU_GOLD_DARK);
         rect(211,40,3,15,YELLOW);
         rect(207,46,11,3,YELLOW);
         rect(211,46,3,3,WHITE);
     }
-    actionMenuCard(&resultTiles[0],"JOGAR NOVAMENTE","START",true);
+    actionMenuCard(&resultTiles[0],more?(g->result==RESULT_TIME?"REPETIR ROUND":"PROXIMO ROUND"):"JOGAR NOVAMENTE","START",true);
     actionMenuCard(&resultTiles[1],"MENU INICIAL","B",false);
 }
 static void battle(const Game *g) {
@@ -769,7 +787,12 @@ static void battle(const Game *g) {
     centeredLabel(evo,2,gameStage(g)==gameFinalStage(g)?"MAX":"EVO",evoReady?WHITE:MUTED,false);
     text(203,8,"TEMPO",CYAN,1);
     snprintf(s,sizeof(s),"%02d:%02d",seconds/60,seconds%60);
-    text(188,22,s,seconds<=30?ORANGE:WHITE,2);
+    bool duel=!gameIsHorde(g->mode);
+    text(188,duel?17:22,s,seconds<=30?ORANGE:WHITE,2);
+    if(duel) {
+        snprintf(s,sizeof(s),"R%d  %d-%d",g->duelRound,g->playerRounds,g->rivalRounds);
+        text(218-(int)strlen(s)*3,35,s,CYAN,1);
+    }
     panel(4,49,248,18,MENU_SILVER,MENU_SLATE);
     if(g->mode==MODE_TEAM) {
         text(12,51,"PARCEIRO",CYAN,1);
