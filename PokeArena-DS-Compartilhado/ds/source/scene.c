@@ -35,6 +35,7 @@ static ActorTrail actorTrails[2];
 typedef struct { unsigned tick; int x,y; bool visible; } StepDust;
 static StepDust stepDust[ACTOR_COUNT];
 static volatile unsigned sceneStepDustDraws;
+static volatile unsigned sceneIdleBreaths;
 static VisualCamera camera;
 static unsigned sceneVertices;
 static unsigned scenePolygons,primitiveStart;
@@ -154,14 +155,18 @@ static void bindActor(int id,const NativeAnim *anim,int index,int palette) {
     }
     bindSprite(id,begin,palette);
 }
-static void billboard(int x,int y,int width,int height,int z) {
+/* Vertical coordinates use the projection's subpixel grid. */
+static void billboardFixedY(int x,int y,int width,int height,int z) {
     int left=x-width/2,top=y-height;
     beginPrimitive(GL_QUADS);
-    glTexCoord2i(0,0);projectedVertex(left*256,top*256,z);
-    glTexCoord2i(boundTextureSize,0);projectedVertex((left+width)*256,top*256,z);
-    glTexCoord2i(boundTextureSize,boundTextureSize);projectedVertex((left+width)*256,y*256,z);
-    glTexCoord2i(0,boundTextureSize);projectedVertex(left*256,y*256,z);
+    glTexCoord2i(0,0);projectedVertex(left*256,top,z);
+    glTexCoord2i(boundTextureSize,0);projectedVertex((left+width)*256,top,z);
+    glTexCoord2i(boundTextureSize,boundTextureSize);projectedVertex((left+width)*256,y,z);
+    glTexCoord2i(0,boundTextureSize);projectedVertex(left*256,y,z);
     endPrimitive();
+}
+static void billboard(int x,int y,int width,int height,int z) {
+    billboardFixedY(x,y*256,width,height*256,z);
 }
 static void prop(int x,int y,int w,int h,int u,int v,int tw,int th) {
     int left=x-w/2,bottom=groundY(y),top=bottom-h,z=spriteDepth(y);
@@ -376,6 +381,7 @@ static void actor(int id,int species,int requested,int facing,uint32_t serial,in
         p->serial=serial;
         p->once=false;
         p->walkGrace=0;
+        p->idleBlend=0;
     } else visualPoseStep(p,species,requested,facing,serial,frameDelta,duration(species,p->anim));
     int anim=p->anim,elapsed=p->elapsed;
     bool loop=!p->once;
@@ -413,11 +419,21 @@ static void actor(int id,int species,int requested,int facing,uint32_t serial,in
     int base=previewSize?previewSize:48;
     int size=base*a->sourceSize/40;
     int width=size,height=size,footX=x;
-    int sy=groundY(y)+(anchor?anchor[1]:a->foot[facing])*height/a->sourceSize,z=spriteDepth(y);
+    int footOffset=anchor?anchor[1]:a->foot[facing];
+    int sy=groundY(y)+footOffset*height/a->sourceSize,z=spriteDepth(y);
+    int breath=0;
+    if((anim==NATIVE_IDLE || anim==NATIVE_WALK) && !reaction && !previewSize && !dodge && p->idleBlend) {
+        unsigned phase=((unsigned)(anim==NATIVE_IDLE?elapsed:p->idleTime)*256+id*8192u)&32767u;
+        breath=(4096-cosLerp(phase))*p->idleBlend*3/640;
+        if(breath) ++sceneIdleBreaths;
+    }
+    int bottomQ8=sy*256+footOffset*breath/a->sourceSize;
+    int heightQ8=height*256+breath;
     if(anchor) x-=anchor[0]*width/a->sourceSize;
     if(period==3&&a->flame) {
         const uint8_t *point=a->flame+2*index;
-        if(point[1]!=255)tailLight(id,x-width/2+point[0]*width/256,sy-height+point[1]*height/256,z/256,y);
+        if(point[1]!=255)tailLight(id,x-width/2+point[0]*width/256,
+                                  (bottomQ8-heightQ8+point[1]*heightQ8/256)/256,z/256,y);
     }
     bindActor(id,a,index,species);
     glPolyFmt(POLY_ALPHA(31)|POLY_CULL_NONE|POLY_ID(id==3?27:id+1));
@@ -433,7 +449,7 @@ static void actor(int id,int species,int requested,int facing,uint32_t serial,in
         }
         glPolyFmt(POLY_ALPHA(31)|POLY_CULL_NONE|POLY_ID(id+1));
     }
-    billboard(x,sy,width,height,z);
+    billboardFixedY(x,bottomQ8,width,heightQ8,z);
     if(id<2 && frameDelta) {
         ActorTrail *trail=&actorTrails[id];
         for(int i=3;i>0;--i) {trail->x[i]=trail->x[i-1];trail->y[i]=trail->y[i-1];}

@@ -434,6 +434,8 @@ def main():
         assert metric('battlePeriod')==first_period and metric('sceneRandomSelections')==duel_lighting_count
         performance.append({'scenario':'movement','display_frames':render_rate,'logic_ticks':logic_rate,'emulated_frames':60})
         assert metric('sceneStepDustDraws')>0,'Walking dust was not rendered'
+        assert metric('sceneIdleBreaths')>0,'Idle breathing was not rendered'
+        checks.append('idle breathing rendered with normal movement and combat')
         checks.append('subtle step dust rendered during normal movement')
         if args.smoke:
             print('Preview metrics:',{n:metric(n) for n in ('sceneMaxVertices','sceneMaxPolygons','sceneTextureFailures')})

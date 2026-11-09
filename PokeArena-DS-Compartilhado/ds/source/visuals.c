@@ -92,6 +92,7 @@ void visualPoseStep(VisualPose *p,int species,int requested,int facing,uint32_t 
         p->facing = facing;
         p->rateRemainder = 0;
         p->walkGrace = 0;
+        p->idleBlend = 0;
         return;
     }
     if(p->once && p->elapsed<duration) {
@@ -102,6 +103,7 @@ void visualPoseStep(VisualPose *p,int species,int requested,int facing,uint32_t 
     if(requested == 1) p->walkGrace = 2;
     else if(p->walkGrace > 0) p->walkGrace -= delta;
     p->anim = requested == 1 || p->walkGrace > 0 ? 1 : 0;
+    p->idleBlend = clamp(p->idleBlend+(p->anim==0?delta:-2*delta),0,10);
     int *clock = p->anim == 1 ? &p->walkTime : &p->idleTime;
     p->elapsed = *clock;
     *clock += delta;

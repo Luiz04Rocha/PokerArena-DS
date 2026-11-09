@@ -9,7 +9,7 @@ enum { FX_FIRE_BOLT, FX_FIRE_BURST, FX_FIRE_DASH, FX_FIRE_BEAM, FX_FIRE_ULT,
        FX_COUNT, FX_FRAMES=6, VISUAL_DIRECTIONS=8 };
 typedef struct {
     int species, anim, facing, elapsed, rateRemainder;
-    int idleTime, walkTime, walkGrace;
+    int idleTime, walkTime, walkGrace, idleBlend;
     uint32_t serial;
     bool once, hurtRequested;
 } VisualPose;
