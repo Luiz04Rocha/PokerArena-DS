@@ -32,6 +32,9 @@ static int frameDelta,renderHalf;
 static int waterFrame, resultFrames, resultClock, trailWave;
 typedef struct {int x[4],y[4],count;} ActorTrail;
 static ActorTrail actorTrails[2];
+typedef struct { unsigned tick; int x,y; bool visible; } StepDust;
+static StepDust stepDust[ACTOR_COUNT];
+static volatile unsigned sceneStepDustDraws;
 static VisualCamera camera;
 static unsigned sceneVertices;
 static unsigned scenePolygons,primitiveStart;
@@ -201,6 +204,27 @@ static void teamMarker(int x,int y,bool allied) {
     worldVertex(x-6,y+9,2);worldVertex(x,y+6,2);
     worldVertex(x+6,y+9,2);worldVertex(x,y+12,2);
     endPrimitive();
+}
+static void walkingDust(int id,unsigned tick,bool walking,int x,int y,int oldX,int oldY) {
+    StepDust *dust=&stepDust[id];
+    if(walking && (x!=oldX || y!=oldY) && (tick+id*3u)%9==0 &&
+       (!dust->visible || dust->tick!=tick)) {
+        *dust=(StepDust){tick,oldX/POS_SCALE-2*((x>oldX)-(x<oldX)),
+                         oldY/POS_SCALE-2*((y>oldY)-(y<oldY)),true};
+    }
+    unsigned age=tick-dust->tick;
+    if(!dust->visible || age>=7) return;
+    noTexture();
+    glPolyFmt(POLY_ALPHA(13-age)|POLY_CULL_NONE|POLY_ID(28+id));
+    color(RGB15(24,20,13));
+    beginPrimitive(GL_QUADS);
+    for(int i=0;i<2;++i) {
+        int px=dust->x+(i?2:-2),py=dust->y+i, h=2+age/3+i;
+        worldVertex(px-1,py,h);worldVertex(px,py-1,h);
+        worldVertex(px+1,py,h);worldVertex(px,py+1,h);
+    }
+    endPrimitive();
+    ++sceneStepDustDraws;
 }
 static void ground(void) {
     glBindTexture(0,textures[GROUND_TEXTURE]);glColor(RGB15(31,31,31));
@@ -605,6 +629,7 @@ void sceneDraw(const Game *g,const Game *old,int half,int displayTicks) {
         for(int i=0;i<ACTOR_COUNT;++i) {memset(&poses[i],0,sizeof(poses[i]));poses[i].species=-1;}
     if(newBattle || trailWave!=g->wave) {
         memset(actorTrails,0,sizeof(actorTrails));
+        memset(stepDust,0,sizeof(stepDust));
         trailWave=g->wave;
     }
     previousState=g->state;
@@ -673,6 +698,18 @@ void sceneDraw(const Game *g,const Game *old,int half,int displayTicks) {
         worldVertex(x+1,y,h);worldVertex(x,y+1,h);
     }
     endPrimitive();
+    if(fight && !g->introTicks && !g->roundDelay) {
+        bool walk=!frozen;
+        unsigned tick=g->frameCounter;
+        walkingDust(0,tick,walk&&g->moving&&!g->dodgeTimer&&!g->dashes[0].ticks&&!g->attackAnim,
+                    g->playerX,g->playerY,old->playerX,old->playerY);
+        walkingDust(1,tick,walk&&g->enemyHp&&g->enemyMoving&&!g->enemyDodgeTimer&&!g->dashes[1].ticks,
+                    g->enemyX,g->enemyY,old->enemyX,old->enemyY);
+        walkingDust(2,tick,walk&&g->partnerHp&&g->partnerMoving,
+                    g->partnerX,g->partnerY,old->partnerX,old->partnerY);
+        walkingDust(3,tick,walk&&g->rival.hp&&g->rival.moving,
+                    g->rival.x,g->rival.y,old->rival.x,old->rival.y);
+    }
     glPolyFmt(POLY_ALPHA(31)|POLY_CULL_NONE|POLY_ID(0));
     if(fight || g->state==STATE_RESULT) {
         int species=gamePlayerSpecies(g),enemySpecies=gameEnemySpecies(g);

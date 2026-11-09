@@ -1,6 +1,6 @@
 # Build with: make -f Makefile.blocksds
 NAME := arena_dupla_dsi
-GAME_TITLE := PokeArena DS v0.31
+GAME_TITLE := PokeArena DS v0.32
 GAME_SUBTITLE := Prototipo nativo DS / DSi
 GAME_AUTHOR := Luiz
 SOURCEDIRS := source
