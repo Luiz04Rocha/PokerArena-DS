@@ -510,8 +510,11 @@ static void testSmoothDashAndSweptHits(void) {
     g=fight(MODE_VS);g.opponentPokemon=0;gameStart(&g);
     g.enemyX=g.playerX+34*POS_SCALE;g.enemyY=g.playerY;
     g.cpuWindup=1;g.cpuMove=2;g.cpuAimX=g.playerX;g.cpuAimY=g.playerY;
+    int warningX,warningY;
+    gameCpuDashPreview(&g,&starters[0].moves[2],&warningX,&warningY);
     origin=g.enemyX;hp=g.playerHp;gameUpdate(&g,0);
     assert(g.enemyX<origin&&g.enemyX>origin-8*POS_SCALE&&g.dashes[1].ticks==DASH_TICKS-1);
+    assert(g.dashes[1].targetX==warningX&&g.dashes[1].targetY==warningY);
     for(int tick=1;tick<DASH_TICKS;++tick)gameUpdate(&g,0);
     assert(g.playerHp==hp-(starters[0].moves[2].damage/2+2));
     g=fight(MODE_VS);g.enemyX=176*POS_SCALE;g.enemyY=130*POS_SCALE;

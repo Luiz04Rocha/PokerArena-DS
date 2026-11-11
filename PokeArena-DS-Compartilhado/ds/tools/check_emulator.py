@@ -505,6 +505,9 @@ def main():
         assert snapshot()['state'] == 2, 'Fight ended before evolution test'
         touch(160,37); assert snapshot()['evolved']
         states['evolution'] = shot('06-evolucao.png')
+        held.add(8);run(4);held.remove(8)
+        assert metric('sceneFireForms')&2,'Charmeleon release did not render'
+        states['charmeleon_release']=shot('37-charmeleon-golpe.png')
         checks.append('native touch evolution')
         while snapshot()['evolutionTicks']<900 and snapshot()['state']==2:
             for direction in (7,4,6,5):
@@ -513,11 +516,16 @@ def main():
         assert snapshot()['state']==2, 'Fight ended before final evolution'
         touch(160,37); assert snapshot()['evolutionStage']==2
         states['final_evolution']=shot('09-charizard.png')
+        held.add(8);run(4);held.remove(8)
+        assert metric('sceneFireForms')&4,'Charizard release did not render'
+        states['charizard_release']=shot('38-charizard-golpe.png')
+        checks.append('distinct fire releases for Charmeleon and Charizard')
         checks.append('second evolution to Charizard')
         for _ in range(300):
             run(1)
             if snapshot()['cpuWindup']>0:
                 assert actor_pose(1)[1]==2,'CPU still idle while preparing an attack'
+                assert metric('sceneCpuWarningDraws')>0,'CPU has no ground warning'
                 states['warning']=shot('10-aviso-cpu.png')
                 checks.append('CPU wind-up warning')
                 break
@@ -758,6 +766,10 @@ def main():
         checks.append('nonzero native audio output')
         assert metric('sceneUploadEndLine')<214,'Texture copy crossed into 3D rendering'
         assert metric('sceneTailLights')>0,'No fire tail lighting rendered at night'
+        assert metric('sceneCpuWarningShapes')>0,'No strong CPU attack warning was rendered'
+        assert metric('sceneFamilyCues')&15==15,'Missing battle cue for a starter family'
+        checks.append('battle cues for all four starter families')
+        checks.append('strong CPU attacks show localized ground warnings')
         checks += ['texture uploads finish before 3D rendering', 'fire tail light at night']
         report = {'emulator':emulator, 'frames':frame_count,
                   'seconds_wall':round(time.monotonic()-started,3), 'rom_sha256':hashlib.sha256(rom_bytes).hexdigest(),

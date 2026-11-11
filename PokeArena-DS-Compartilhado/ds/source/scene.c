@@ -6,6 +6,7 @@
 #include "game.h"
 #include "arena.h"
 #include "visuals.h"
+#include "family_motion.h"
 #include "generated_sprites.h"
 #include "native_sprite_decode.h"
 #include "generated_visuals.h"
@@ -37,6 +38,8 @@ static StepDust stepDust[ACTOR_COUNT];
 static volatile unsigned sceneStepDustDraws;
 static volatile unsigned sceneIdleBreaths;
 static volatile unsigned sceneCharmanderFx;
+static volatile unsigned sceneFamilyCues,sceneFireForms;
+static volatile unsigned sceneCpuWarningDraws,sceneCpuWarningShapes;
 static VisualCamera camera;
 static unsigned sceneVertices;
 static unsigned scenePolygons,primitiveStart;
@@ -159,17 +162,17 @@ static void bindActor(int id,const NativeAnim *anim,int index,int palette) {
     bindSprite(id,begin,palette);
 }
 /* Vertical coordinates use the projection's subpixel grid. */
-static void billboardFixedY(int x,int y,int width,int height,int z) {
+static void billboardFixedY(int x,int y,int width,int height,int z,int lean) {
     int left=x-width/2,top=y-height;
     beginPrimitive(GL_QUADS);
-    glTexCoord2i(0,0);projectedVertex(left*256,top,z);
-    glTexCoord2i(boundTextureSize,0);projectedVertex((left+width)*256,top,z);
+    glTexCoord2i(0,0);projectedVertex((left+lean)*256,top,z);
+    glTexCoord2i(boundTextureSize,0);projectedVertex((left+width+lean)*256,top,z);
     glTexCoord2i(boundTextureSize,boundTextureSize);projectedVertex((left+width)*256,y,z);
     glTexCoord2i(0,boundTextureSize);projectedVertex(left*256,y,z);
     endPrimitive();
 }
 static void billboard(int x,int y,int width,int height,int z) {
-    billboardFixedY(x,y*256,width,height*256,z);
+    billboardFixedY(x,y*256,width,height*256,z,0);
 }
 static void prop(int x,int y,int w,int h,int u,int v,int tw,int th) {
     int left=x-w/2,bottom=groundY(y),top=bottom-h,z=spriteDepth(y);
@@ -203,6 +206,70 @@ static void ellipse(int x,int y,int rx,int ry,int height,int color) {
         worldVertex(x+cosLerp(a)*rx/4096,y+sinLerp(a)*ry/4096,height);
     }
     endPrimitive();
+}
+static void cpuWarningRing(int x,int y,int radius,int width,int segments,int progress) {
+    beginPrimitive(GL_QUAD_STRIP);
+    for(int i=0;i<=segments;++i) {
+        int angle=i*32768/segments,c=cosLerp(angle),s=sinLerp(angle);
+        glColor(i*256<=progress*segments?RGB15(31,23,8):RGB15(31,9,5));
+        worldVertex(x+c*radius/4096,y+s*radius/4096,3);
+        worldVertex(x+c*(radius-width)/4096,y+s*(radius-width)/4096,3);
+    }
+    endPrimitive();
+}
+static void cpuWarningPath(int x,int y,int tx,int ty,int progress,bool dash) {
+    int dx=tx-x,dy=ty-y;
+    int span=abs(dx)>abs(dy)?abs(dx):abs(dy);
+    if(span<2) return;
+    int nx=-dy*256/span,ny=dx*256/span;
+    int segments=dash?1:(span+9)/10;
+    beginPrimitive(GL_QUADS);
+    for(int i=0;i<segments;++i) {
+        int start=i*span/segments;
+        int end=dash?span:start+span/segments*2/3+1;
+        int sx=x+dx*start/span,sy=y+dy*start/span;
+        int ex=x+dx*end/span,ey=y+dy*end/span;
+        int width=dash?3:2;
+        int ox=nx*width/256,oy=ny*width/256;
+        glColor(i*256<progress*segments?RGB15(31,19,6):RGB15(31,9,5));
+        worldVertex(sx+ox,sy+oy,3);worldVertex(ex+ox,ey+oy,3);
+        worldVertex(ex-ox,ey-oy,3);worldVertex(sx-ox,sy-oy,3);
+    }
+    endPrimitive();
+    if(dash && span>=8) {
+        int ex=tx-dx*8/span,ey=ty-dy*8/span;
+        int ox=nx*6/256,oy=ny*6/256;
+        glColor(RGB15(31,23,8));
+        beginPrimitive(GL_TRIANGLES);
+        worldVertex(ex+ox,ey+oy,4);worldVertex(tx,ty,4);worldVertex(ex-ox,ey-oy,4);
+        endPrimitive();
+    }
+}
+static void cpuWarning(const Game *g) {
+    const MoveDef *move=&starters[gameEnemySpecies(g)].moves[g->cpuMove];
+    int total=gameCpuWindupTicks(g)*2;
+    int progress=(total-g->cpuWindup*2+renderHalf)*256/total;
+    int x=g->enemyX/POS_SCALE,y=g->enemyY/POS_SCALE;
+    noTexture();
+    glPolyFmt(POLY_ALPHA(23+progress/64)|POLY_CULL_NONE|POLY_ID(46));
+    cpuWarningRing(x,y,7,2,12,progress);
+    ++sceneCpuWarningDraws;
+    if(!g->cpuMove) return;
+    if(move->kind==MOVE_AREA || move->kind==MOVE_MELEE) {
+        cpuWarningRing(g->cpuAimX/POS_SCALE,g->cpuAimY/POS_SCALE,move->range,3,32,progress);
+    } else {
+        int tx,ty;
+        bool dash=move->kind==MOVE_DASH;
+        if(dash) gameCpuDashPreview(g,move,&tx,&ty);
+        else {
+            /* The CPU keeps tracking the player until a projectile is released. */
+            int stop=arenaSweep(g->enemyX,g->enemyY,g->playerX,g->playerY,2,NULL);
+            tx=arenaAt(g->enemyX,g->playerX,stop);
+            ty=arenaAt(g->enemyY,g->playerY,stop);
+        }
+        cpuWarningPath(x,y,tx/POS_SCALE,ty/POS_SCALE,progress,dash);
+    }
+    sceneCpuWarningShapes|=1u<<move->kind;
 }
 static void teamMarker(int x,int y,bool allied) {
     glPolyFmt(POLY_ALPHA(31)|POLY_CULL_NONE|POLY_ID(0));
@@ -427,7 +494,65 @@ static void resultParticles(int x,int y,int z,bool winner,int t) {
     }
     endPrimitive();
 }
-static void actor(int id,int species,int requested,int facing,uint32_t serial,int x,int y,int dodge,int previewSize,int reaction,int strike) {
+typedef struct { int kind,phase; } AttackCue;
+static AttackCue releaseCue(const VisualCast *cast,int strike) {
+    int phase=64+(cast->age*2+renderHalf)*16;
+    return (AttackCue){cast->kind,strike>=0 && phase<256?phase:0};
+}
+static void cuePixel(int x,int y,int z,int width,int height) {
+    vertex(x-width,y,z);vertex(x,y-height,z);
+    vertex(x+width,y,z);vertex(x,y+height,z);
+}
+static void drawAttackCue(int id,int species,int facing,AttackCue cue,int x,int feetY,
+                          int headX,int headY,int tailX,int tailY,int z) {
+    if(cue.phase<=0 || cue.phase>=256) return;
+    int family=species%STARTER_COUNT,form=species/STARTER_COUNT;
+    if(family==0 && tailY<0) return;
+    int strength=128-abs(cue.phase-128);
+    int side=facing>4?-1:1;
+    noTexture();
+    glPolyFmt(POLY_ALPHA(12+strength/9)|POLY_CULL_NONE|POLY_ID(id==3?54:32+id));
+    ++z;
+    beginPrimitive(GL_QUADS);
+    switch(family) {
+    case 0:
+        /* Ember trails are measured from the current authored tail frame. */
+        for(int i=0;i<3+form;++i) {
+            int spread=2+i*(2+form);
+            int y=tailY-2-i*2-strength/36;
+            glColor(form==2 && !(i&1)?RGB15(24,29,31):i&1?RGB15(31,12,3):RGB15(31,27,10));
+            cuePixel(tailX+((i&1)?-spread:spread),y,z,1+(form && i==0),2+form);
+        }
+        break;
+    case 1:
+        for(int i=0;i<3+form;++i) {
+            int spread=3+i*3+form;
+            int y=feetY-3-(i%3)*3-cue.phase/48;
+            glColor(i&1?RGB15(9,22,31):RGB15(21,29,31));
+            cuePixel(x+(i&1?-spread:spread),y,z,1+i%2,2+i%2);
+        }
+        break;
+    case 2:
+        for(int i=0;i<3+form;++i) {
+            int spread=7+i*3+form;
+            glColor(i&1?RGB15(9,23,8):RGB15(21,29,9));
+            cuePixel(x+(i&1?-spread:spread),feetY-3-(i%3)*2-strength/32,z,2+form,1+i%2);
+        }
+        break;
+    case 3:
+        for(int i=0;i<2+form;++i) {
+            int sx=headX+side*(4+i*4);
+            int sy=headY-((i+cue.phase/32)%3)*3;
+            glColor(i==1?RGB15(31,19,3):RGB15(31,29,13));
+            vertex(sx-side*2,sy+3,z);vertex(sx,sy-3,z);
+            vertex(sx+side*3,sy-4,z);vertex(sx+side,sy+1,z);
+        }
+        break;
+    }
+    endPrimitive();
+    sceneFamilyCues|=1u<<species;
+}
+static void actor(int id,int species,int requested,int facing,uint32_t serial,int x,int y,int dodge,int previewSize,int reaction,int strike,AttackCue cue) {
     VisualPose *p=&poses[id];
     if(dodge && frameDelta) {
         requested=NATIVE_WALK;
@@ -484,7 +609,10 @@ static void actor(int id,int species,int requested,int facing,uint32_t serial,in
     ellipse(x,y,7,4,2,RGB15(6,9,12));
     int base=previewSize?previewSize:48;
     int size=base*a->sourceSize/40;
-    int width=size,height=size,footX=x;
+    if(dodge || reaction) cue.phase=0;
+    FamilyMotion motion=familyMotion(species,cue.kind,cue.phase);
+    int width=size+motion.width,height=size-motion.squash,footX=x;
+    int lean=(facing==0 || facing==4)?0:motion.advance*(facing<4?1:-1);
     int footOffset=anchor?anchor[1]:a->foot[facing];
     int sy=groundY(y)+footOffset*height/a->sourceSize,z=spriteDepth(y);
     int breath=0;
@@ -496,10 +624,15 @@ static void actor(int id,int species,int requested,int facing,uint32_t serial,in
     int heightQ8=height*256+breath;
     int bottomQ8=groundY(y)*256+footOffset*heightQ8/a->sourceSize;
     if(anchor) x-=anchor[0]*width/a->sourceSize;
-    if(period==3&&a->flame) {
+    x-=lean*footOffset/a->sourceSize;
+    int tailX=0,tailY=-1;
+    if(a->flame && (period==3 || cue.phase)) {
         const uint8_t *point=a->flame+2*index;
-        if(point[1]!=255)tailLight(id,x-width/2+point[0]*width/256,
-                                  (bottomQ8-heightQ8+point[1]*heightQ8/256)/256,z/256,y);
+        if(point[1]!=255) {
+            tailX=x-width/2+point[0]*width/256+lean*(256-point[1])/256;
+            tailY=(bottomQ8-heightQ8+point[1]*heightQ8/256)/256;
+            if(period==3) tailLight(id,tailX,tailY,z/256,y);
+        }
     }
     bindActor(id,a,index,species);
     glPolyFmt(POLY_ALPHA(31)|POLY_CULL_NONE|POLY_ID(id==3?27:id+1));
@@ -515,7 +648,12 @@ static void actor(int id,int species,int requested,int facing,uint32_t serial,in
         }
         glPolyFmt(POLY_ALPHA(31)|POLY_CULL_NONE|POLY_ID(id+1));
     }
-    billboardFixedY(x,bottomQ8,width,heightQ8,z);
+    billboardFixedY(x,bottomQ8,width,heightQ8,z,lean);
+    if(cue.phase) {
+        int headX=footX+(anchor?anchor[2]*width/a->sourceSize:0)+lean/2;
+        int headY=groundY(y)-(anchor?anchor[3]*height/a->sourceSize:12);
+        drawAttackCue(id,species,facing,cue,footX,groundY(y),headX,headY,tailX,tailY,z/256);
+    }
     if(id<2 && frameDelta) {
         ActorTrail *trail=&actorTrails[id];
         for(int i=3;i>0;--i) {trail->x[i]=trail->x[i-1];trail->y[i]=trail->y[i-1];}
@@ -607,8 +745,9 @@ static void fireTriangle(FireAxis a,int from,int center,int length,int width,int
     fireVertex(a,from,center+width,height);
     fireVertex(a,from+length,center,height+2);
 }
-static void drawCharmanderImpact(const VisualImpact *impact,int age,int slot) {
-    int style=impact->fireStyle-1;
+static void drawFireImpact(const VisualImpact *impact,int age,int slot) {
+    int form=(impact->fireStyle-1)/5;
+    int style=(impact->fireStyle-1)%5;
     int size=style==FX_FIRE_ULT?3:style==FX_FIRE_BEAM?2:1;
     int count=impact->hit?3+size:3;
     int x=impact->x/POS_SCALE,y=impact->y/POS_SCALE;
@@ -616,19 +755,45 @@ static void drawCharmanderImpact(const VisualImpact *impact,int age,int slot) {
     glPolyFmt(POLY_ALPHA((impact->hit?28:22)-age)|POLY_CULL_NONE|POLY_ID(40+slot));
     beginPrimitive(GL_TRIANGLES);
     for(int i=0;i<count;++i) {
-        FireAxis a=fireAxis(x,y,i*32768/count+2048);
+        FireAxis a=fireAxis(x,y,i*32768/count+2048+form*age*192);
         int reach=(2+age/3)*size;
-        glColor(i%2?RGB15(31,12,3):RGB15(31,26,9));
-        fireTriangle(a,reach/2,0,reach,impact->hit?size+1:1,3+age/3);
+        glColor(form==2 && !(i%2)?RGB15(22,27,31):i%2?RGB15(31,8+form*2,3):RGB15(31,26,9));
+        fireTriangle(a,reach/2,0,reach+form,impact->hit?size+1:1,3+age/3+form);
     }
     endPrimitive();
 }
-static void drawCharmanderShot(int style,int x,int y,int height,int facing,int age,int reach,int id) {
+static void drawFireShot(int species,int style,int x,int y,int height,int facing,int age,int reach,int id) {
     FireAxis a=fireAxis(x,y,facing*4096);
     noTexture();
     glPolyFmt(POLY_ALPHA(30)|POLY_CULL_NONE|POLY_ID(id));
     beginPrimitive(GL_TRIANGLES);
-    if(style==FX_FIRE_BOLT) {
+    if(species==4) {
+        /* Charmeleon's heat leaves a narrow blade and staggered sparks. */
+        int length=style==FX_FIRE_BOLT?13:reach+8;
+        int width=style==FX_FIRE_ULT?8:style==FX_FIRE_BEAM?5:3;
+        glColor(RGB15(25,4,5));fireTriangle(a,-length,0,length+12,width+2,height);
+        glColor(RGB15(31,12,3));fireTriangle(a,-length+3,0,length+7,width,height+2);
+        glColor(RGB15(31,27,9));fireTriangle(a,-length/2,0,length/2+8,2,height+4);
+        for(int i=0;i<4;++i) {
+            int side=(i&1?1:-1)*(width+1+age%4);
+            glColor(i<2?RGB15(31,23,5):RGB15(27,6,3));
+            fireTriangle(a,-4-i*3,side,5+i,1,height+i%3+1);
+        }
+    } else if(species==8) {
+        /* Charizard's exhaust fans outward around a pale central jet. */
+        int length=style==FX_FIRE_BOLT?12:reach+10;
+        int spread=style==FX_FIRE_ULT?12:style==FX_FIRE_BEAM?7:4;
+        for(int side=-1;side<=1;side+=2) {
+            glColor(RGB15(28,6,4));
+            fireVertex(a,-length,side*(spread+age%5),height+3);
+            fireVertex(a,-length/2,side*spread,height+9);
+            fireVertex(a,10,0,height+4);
+            glColor(RGB15(31,19,4));
+            fireTriangle(a,-length/2,side*(spread-2),length/2+7,3,height+4);
+        }
+        glColor(RGB15(31,27,12));fireTriangle(a,-length,0,length+11,4,height+4);
+        glColor(RGB15(22,29,31));fireTriangle(a,-length/2,0,length/2+10,2,height+6);
+    } else if(style==FX_FIRE_BOLT) {
         for(int i=-1;i<=1;++i) {
             int offset=i*(3+age%4),tail=i?5:10;
             glColor(i?RGB15(30,10,2):RGB15(31,16,2));
@@ -670,27 +835,30 @@ static void drawCharmanderShot(int style,int x,int y,int height,int facing,int a
         glColor(RGB15(31,31,24));fireTriangle(a,6,0,5,1,height+11);
     }
     endPrimitive();
-    sceneCharmanderFx|=1u<<style;
+    if(species==0) sceneCharmanderFx|=1u<<style;
 }
-static void drawCharmanderCast(const VisualCast *v,int age,int total,int slot) {
+static void drawFireCast(const VisualCast *v,int age,int total,int slot) {
     int x=v->originX/POS_SCALE,y=v->originY/POS_SCALE;
+    sceneFireForms|=1u<<(v->species/STARTER_COUNT);
     if(v->style!=FX_FIRE_DASH && v->style!=FX_FIRE_BURST) {
         int height=14;
         attackOrigin(v->species,v->facing,&x,&height,8);
-        drawCharmanderShot(v->style,x,y,height,v->facing,age,8+age,8+slot);
+        drawFireShot(v->species,v->style,x,y,height,v->facing,age,8+age,8+slot);
         return;
     }
     noTexture();
     glPolyFmt(POLY_ALPHA(28-age*12/total)|POLY_CULL_NONE|POLY_ID(8+slot));
     beginPrimitive(GL_TRIANGLES);
+    int form=v->species/4;
     if(v->style==FX_FIRE_BURST) {
-        for(int i=0;i<10;++i) {
-            FireAxis a=fireAxis(x,y,i*32768/10);
+        int tongues=10-form*2;
+        for(int i=0;i<tongues;++i) {
+            FireAxis a=fireAxis(x,y,i*32768/tongues+form*age*160);
             int r=v->range-5+age*5/total;
             glColor(i%2?RGB15(31,13,3):RGB15(31,7,2));
-            fireVertex(a,r-11,-6,3);fireVertex(a,r-11,6,3);
-            fireVertex(a,r+2,0,5+(total-age)*(i%3+2)/4);
-            glColor(RGB15(31,27,9));
+            fireVertex(a,r-11,-6-form,3);fireVertex(a,r-11,6+form,3);
+            fireVertex(a,r+2,0,5+(total-age)*(i%3+2+form)/4);
+            glColor(form==2?RGB15(25,29,31):RGB15(31,27,9));
             fireVertex(a,r-9,-3,4);fireVertex(a,r-9,3,4);
             fireVertex(a,r-1,0,5+(total-age)*(i%3+1)/4);
         }
@@ -705,22 +873,22 @@ static void drawCharmanderCast(const VisualCast *v,int age,int total,int slot) {
             FireAxis a=fireAxis(px,py,v->facing*4096);
             for(int side=-1;side<=1;side+=2) {
                 glColor(i?RGB15(28,8,3):RGB15(31,17,4));
-                fireVertex(a,-14,side*(9-i),4);fireVertex(a,-8,side*(12-i),6);fireVertex(a,9,side*4,9);
-                glColor(RGB15(31,28,11));
-                fireVertex(a,-8,side*(8-i),6);fireVertex(a,-4,side*(10-i),8);fireVertex(a,7,side*4,10);
+                fireVertex(a,-14-form*3,side*(9-i),4);fireVertex(a,-8,side*(12-i+form),6+form);fireVertex(a,9,side*4,9);
+                glColor(form==2?RGB15(22,28,31):RGB15(31,28,11));
+                fireVertex(a,-8,side*(8-i),6);fireVertex(a,-4,side*(10-i+form),8+form);fireVertex(a,7,side*4,10);
             }
         }
     }
     endPrimitive();
-    sceneCharmanderFx|=1u<<v->style;
+    if(v->species==0) sceneCharmanderFx|=1u<<v->style;
 }
 static void drawCast(const VisualCast *v,int slot) {
     if(!v->ticks) return;
     static const int dx[8]={0,181,256,181,0,-181,-256,-181};
     static const int dy[8]={256,181,0,-181,-256,-181,0,181};
     int age=v->age*2+renderHalf,total=v->totalTicks*2;
-    if(v->species==0 && v->style<=FX_FIRE_ULT) {
-        drawCharmanderCast(v,age,total,slot);
+    if(v->species%4==0 && v->style<=FX_FIRE_ULT) {
+        drawFireCast(v,age,total,slot);
         return;
     }
     int frame=age*6/total;if(frame>5)frame=5;
@@ -928,6 +1096,7 @@ void sceneDraw(const Game *g,const Game *old,int half,int displayTicks) {
         walkingDust(3,tick,walk&&g->rival.hp&&g->rival.moving,
                     g->rival.x,g->rival.y,old->rival.x,old->rival.y);
     }
+    if(fight && g->enemyHp && g->cpuWindup) cpuWarning(g);
     glPolyFmt(POLY_ALPHA(31)|POLY_CULL_NONE|POLY_ID(0));
     if(fight || g->state==STATE_RESULT) {
         int species=gamePlayerSpecies(g),enemySpecies=gameEnemySpecies(g);
@@ -936,6 +1105,8 @@ void sceneDraw(const Game *g,const Game *old,int half,int displayTicks) {
         int enemyFacing=visualTargetFacing(poses[1].facing,playerX-enemyX,playerY-enemyY);
         int playerStrike=fight?strikeTime(&g->casts[0],species,renderHalf):-1;
         int enemyStrike=fight?strikeTime(&g->casts[1],enemySpecies,renderHalf):-1;
+        AttackCue playerCue=releaseCue(&g->casts[0],playerStrike);
+        AttackCue enemyCue=releaseCue(&g->casts[1],enemyStrike);
         if(playerStrike>=0) playerFacing=g->casts[0].facing;
         if(enemyStrike>=0) enemyFacing=g->casts[1].facing;
         if(fight && g->cpuWindup) {
@@ -945,6 +1116,7 @@ void sceneDraw(const Game *g,const Game *old,int half,int displayTicks) {
             int elapsed=total-g->cpuWindup*2+renderHalf;
             int release=move->kind==MOVE_DASH?attack->rushTime:attack->hitTime;
             enemyStrike=release*elapsed/total;
+            enemyCue=(AttackCue){move->kind,elapsed*256/total};
             if(move->kind==MOVE_DASH)
                 enemyFacing=visualDirection(g->cpuAimX-g->enemyX,g->cpuAimY-g->enemyY);
         }
@@ -954,21 +1126,22 @@ void sceneDraw(const Game *g,const Game *old,int half,int displayTicks) {
             if(g->enemyHp) teamMarker(enemyX,enemyY,false);
             if(g->rival.hp) teamMarker(rivalX,rivalY,false);
         }
-        actor(0,species,g->hurtAnim?3:g->moving?1:0,playerFacing,g->casts[0].serial,playerX,playerY,fight?g->dodgeTimer:0,0,reaction,playerStrike);
+        actor(0,species,g->hurtAnim?3:g->moving?1:0,playerFacing,g->casts[0].serial,playerX,playerY,fight?g->dodgeTimer:0,0,reaction,playerStrike,playerCue);
         int enemyReaction=g->mode==MODE_TEAM && !g->enemyHp?-1:-reaction;
-        actor(1,enemySpecies,g->enemyHurtAnim?3:g->enemyMoving?1:0,enemyFacing,g->casts[1].serial,enemyX,enemyY,fight?g->enemyDodgeTimer:0,0,enemyReaction,enemyStrike);
+        actor(1,enemySpecies,g->enemyHurtAnim?3:g->enemyMoving?1:0,enemyFacing,g->casts[1].serial,enemyX,enemyY,fight?g->enemyDodgeTimer:0,0,enemyReaction,enemyStrike,enemyCue);
         if(g->partnerHp>0) {
             if(team) teamMarker(partnerX,partnerY,true);
             bool targetsRival=g->rival.hp && (g->rival.aimAtPartner || !g->enemyHp);
             int facing=visualTargetFacing(poses[2].facing,(targetsRival?rivalX:focusX)-partnerX,(targetsRival?rivalY:focusY)-partnerY);
-            actor(2,(g->selectedPokemon+1)%4,g->partnerMoving?1:0,facing,g->partnerAttackSerial,partnerX,partnerY,false,0,reaction,-1);
+            actor(2,(g->selectedPokemon+1)%4,g->partnerMoving?1:0,facing,g->partnerAttackSerial,partnerX,partnerY,false,0,reaction,-1,(AttackCue){0});
         }
         if(g->mode==MODE_TEAM) {
             bool targetsPartner=g->rival.windup?g->rival.aimAtPartner:g->partnerHp>0;
             int x=targetsPartner?g->partnerX/POS_SCALE:playerX,y=targetsPartner?g->partnerY/POS_SCALE:playerY;
             int facing=visualTargetFacing(poses[3].facing,x-rivalX,y-rivalY);
             int rivalReaction=g->rival.hp?-reaction:-1;
-            actor(3,gameRivalSpecies(g),g->rival.hurt?3:g->rival.moving?1:0,facing,g->rival.attackSerial,rivalX,rivalY,false,0,rivalReaction,-1);
+            AttackCue rivalCue={MOVE_MELEE,g->rival.windup?(12-g->rival.windup)*256/12:0};
+            actor(3,gameRivalSpecies(g),g->rival.hurt?3:g->rival.moving?1:0,facing,g->rival.attackSerial,rivalX,rivalY,false,0,rivalReaction,-1,rivalCue);
         }
     }
     if(fight) {
@@ -981,9 +1154,9 @@ void sceneDraw(const Game *g,const Game *old,int half,int displayTicks) {
             if(age<8)attackOrigin(p->species,facing,&x,&height,8-age);
             glPolyFmt(POLY_ALPHA(p->life<3?9+p->life*6:27)|POLY_CULL_NONE|POLY_ID(4+i));
             if(!p->mine) ellipse(x,y,4,3,3,RGB15(25,6,6));
-            if(p->species==0 && p->style<=FX_FIRE_ULT) {
+            if(p->species%4==0 && p->style<=FX_FIRE_ULT) {
                 int reach=9+age;
-                drawCharmanderShot(p->style,x,y,height,facing,age,reach<35?reach:35,4+i);
+                drawFireShot(p->species,p->style,x,y,height,facing,age,reach<35?reach:35,4+i);
                 continue;
             }
             fxBind(PROJECTILE_TEXTURE+i,p->style,facing,(age/3)%6);
@@ -999,7 +1172,7 @@ void sceneDraw(const Game *g,const Game *old,int half,int displayTicks) {
             int age=(IMPACT_TICKS-impact->ticks)*2+renderHalf;
             groundReaction(impact,i,age);
             if(impact->fireStyle) {
-                drawCharmanderImpact(impact,age,i);
+                drawFireImpact(impact,age,i);
                 continue;
             }
             if(impact->hit) {
@@ -1015,28 +1188,10 @@ void sceneDraw(const Game *g,const Game *old,int half,int displayTicks) {
             fxBind(EVOLUTION_TEXTURE,FX_EVOLVE,0,((36-g->evolutionAnim)*2+renderHalf)/4%6);
             effectAt(playerX,playerY,48,17);
         }
-        if(g->cpuWindup) {
-            glPolyFmt(POLY_ALPHA(24)|POLY_CULL_NONE|POLY_ID(46));
-            const MoveDef *m=&starters[gameEnemySpecies(g)].moves[g->cpuMove];
-            int ax=g->enemyX/POS_SCALE,ay=g->enemyY/POS_SCALE;
-            ellipse(ax,ay,5,3,3,RGB15(31,19,5));
-            if(m->kind==MOVE_PROJECTILE || m->kind==MOVE_DASH) {
-                int targetX=m->kind==MOVE_DASH?g->cpuAimX:g->playerX;
-                int targetY=m->kind==MOVE_DASH?g->cpuAimY:g->playerY;
-                int stop=arenaSweep(g->enemyX,g->enemyY,targetX,targetY,m->kind==MOVE_DASH?ARENA_ACTOR_MARGIN:2,NULL);
-                int tx=arenaAt(g->enemyX,targetX,stop)/POS_SCALE;
-                int ty=arenaAt(g->enemyY,targetY,stop)/POS_SCALE;
-                for(int i=1;i<8;++i) ellipse(ax+(tx-ax)*i/8,ay+(ty-ay)*i/8,2,2,3,RGB15(31,6,6));
-            }
-            else {
-                int x=g->cpuAimX/POS_SCALE,y=g->cpuAimY/POS_SCALE;
-                for(int i=0;i<16;++i) {int a=i*2048;ellipse(x+cosLerp(a)*m->range/4096,y+sinLerp(a)*m->range/4096,2,2,3,RGB15(31,6,6));}
-            }
-        }
-    } else if(g->state==STATE_SELECT) actor(0,g->selectedPokemon,0,0,0,128,129,false,64,0,-1);
+    } else if(g->state==STATE_SELECT) actor(0,g->selectedPokemon,0,0,0,128,129,false,64,0,-1,(AttackCue){0});
     else if(g->state==STATE_OPPONENT) {
-        actor(0,g->selectedPokemon,0,0,0,86,127,false,48,0,-1);
-        actor(1,g->opponentPokemon,0,0,0,171,127,false,48,0,-1);
+        actor(0,g->selectedPokemon,0,0,0,86,127,false,48,0,-1,(AttackCue){0});
+        actor(1,g->opponentPokemon,0,0,0,171,127,false,48,0,-1,(AttackCue){0});
     }
     if(sceneVertices>sceneMaxVertices)sceneMaxVertices=sceneVertices;
     if(scenePolygons>sceneMaxPolygons)sceneMaxPolygons=scenePolygons;

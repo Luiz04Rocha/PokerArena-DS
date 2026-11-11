@@ -39,6 +39,7 @@ typedef struct {
 } PokemonDef;
 typedef struct { int x, y, vx, vy, damage, life; bool mine, ultimate; Element element; int style, age,prevX,prevY; uint32_t serial; int species; } Projectile;
 typedef struct { int x,y,originX,originY,facing,style,kind,range,ticks,totalTicks,source; int age,motionTicks; uint32_t serial; int species; } VisualCast;
+/* fireStyle is zero for standard impacts, otherwise 1 + move style + 5 * form. */
 typedef struct { int x,y,ticks; Element element; bool hit; uint8_t fireStyle; } VisualImpact;
 typedef struct { int ticks,startX,startY,targetX,targetY,damage,range; bool hit; } DashAction;
 typedef struct {
@@ -91,6 +92,7 @@ int gameRivalSpecies(const Game *g);
 bool gameAimsAtRival(const Game *g);
 int gamePlayerSpecies(const Game *g);
 int gameCpuWindupTicks(const Game *g);
+void gameCpuDashPreview(const Game *g,const MoveDef *move,int *x,int *y);
 int gameDashProgress(int halfTicks);
 const char *gameWaveName(const Game *g);
 int gameAttackDamage(const Game *g, int slot);
