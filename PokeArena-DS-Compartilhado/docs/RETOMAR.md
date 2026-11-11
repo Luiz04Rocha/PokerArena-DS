@@ -1,6 +1,6 @@
 # Retomar PokeArena DS
 
-Versão atual **0.39**. Jogo nativo em C/BlocksDS para Nintendo DSi XL.
+Versão atual **0.40**. Jogo nativo em C/BlocksDS para Nintendo DSi XL.
 
 ## Últimas instruções de Luiz
 
@@ -43,6 +43,8 @@ Na 0.29, Luiz pediu uma abertura com mais movimento. A casinha deu lugar a uma n
 Na 0.39, a praça de abertura e o campo de batalha ganharam novas camadas de cenário. A entrada da arena usa degraus em geometria 3D e o caminho segue no piso em pixel art. A câmera abre durante a contagem e se ajusta à posição dos lutadores, incluindo o parceiro e os dois rivais no 2 vs 2. Pressionar um golpe no fim da esquiva guarda o comando até ele poder sair.
 
 Os quadros das onze formas agora são montados a partir dos pixels originais, alinhados pelos marcadores de apoio do SpriteCollab. Durante a luta, a pose parada respira e pisca de perfil. A abertura mantém quatro Pokémon em circulação e alterna entre as onze formas. O HUD diferencia o golpe disponível, acionado e em recarga pelas cores, pelo texto e pela barra de progresso.
+
+Na 0.40, as quatro famílias ganharam posturas de ataque e efeitos próximos ao corpo. O fogo usa a posição da chama da cauda e tem disparos, investidas e impactos próprios para Charmander, Charmeleon e Charizard. As marcas no chão da CPU indicam o tipo de golpe durante a preparação. Nos duelos, o resultado dá espaço à reação dos Pokémon e mostra o placar e a forma que segue para o round seguinte.
 
 O período é sorteado ao iniciar a batalha e vale também durante pausas e ondas. L/R na pausa demonstram os quatro horários. A opção SORTEIO restaura o período daquela partida.
 

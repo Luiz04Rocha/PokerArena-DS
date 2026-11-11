@@ -693,6 +693,14 @@ static void titleCover(int firstRow,unsigned ticks) {
     rect(185,y+2,2,1,TITLE_PULSE+level);
     center(y+3,"TOQUE PARA COME\xC7" "AR",TITLE_PULSE+level,1);
 }
+static void roundPips(int x,int y,int wins,int color) {
+    for(int i=0;i<2;++i) {
+        int fill=i<wins?color:MENU_FRAME;
+        rect(x+i*10,y+1,8,4,fill);
+        rect(x+i*10+1,y,6,6,fill);
+        if(i<wins) rect(x+i*10+2,y+1,4,1,WHITE);
+    }
+}
 static void matchup(const Game *g) {
     int species[2]={gamePlayerSpecies(g),gameEnemySpecies(g)};
     menuLandscape();
@@ -717,8 +725,11 @@ static void matchup(const Game *g) {
     panel(28,124,200,23,HUD_EDGE,HUD_INK);
     if(!gameIsHorde(g->mode)) {
         char score[32];
-        snprintf(score,sizeof(score),"ROUND %d   VOCE %d-%d CPU",g->duelRound,g->playerRounds,g->rivalRounds);
-        center(g->mode==MODE_TEAM?128:132,score,CYAN,1);
+        int scoreY=g->mode==MODE_TEAM?128:132;
+        snprintf(score,sizeof(score),"ROUND %d  |  %d - %d",g->duelRound,g->playerRounds,g->rivalRounds);
+        center(scoreY,score,CYAN,1);
+        roundPips(42,scoreY,g->playerRounds,CYAN);
+        roundPips(196,scoreY,g->rivalRounds,ORANGE);
         if(g->mode==MODE_TEAM) {
             char partner[40];
             snprintf(partner,sizeof(partner),"PARCEIRO: %s",starters[(g->selectedPokemon+1)%STARTER_COUNT].name);
@@ -769,21 +780,41 @@ static void resultMenu(const Game *g) {
     int accent=won?YELLOW:g->result==RESULT_TIME?CYAN:MUTED;
     menuLandscape();
     menuHeader(resultLabel(g),2);
-    panel(20,33,216,54,MENU_STEEL_BLUE,MENU_SLATE);
-    menuPortrait(gamePlayerSpecies(g),31,45,30,accent);
-    text(72,42,"LIDER",MUTED,1);
-    text(72,54,gamePlayerName(g),WHITE,1);
     if(gameIsHorde(g->mode)) {
+        panel(20,33,216,54,MENU_STEEL_BLUE,MENU_SLATE);
+        menuPortrait(gamePlayerSpecies(g),31,45,30,accent);
+        text(72,42,"LIDER",MUTED,1);
+        text(72,54,gamePlayerName(g),WHITE,1);
         text(72,69,gameModeName(g),MUTED,1);
         char wave[16];
         snprintf(wave,sizeof(wave),"ONDA %d/%d",g->wave,WAVE_COUNT);
         textRight(224,69,wave,WHITE);
     } else {
-        char score[32];
-        snprintf(score,sizeof(score),"ROUND %d   VOCE %d-%d CPU",g->duelRound,g->playerRounds,g->rivalRounds);
-        text(72,69,score,CYAN,1);
+        int enemy=gameEnemySpecies(g);
+        const HudButton leader={12,33,74,53,0},rival={170,33,74,53,0};
+        commandCard(&leader,HUD_SURFACE,won?YELLOW:CYAN,HUD_EDGE);
+        commandCard(&rival,HUD_SURFACE,g->result==RESULT_KO?YELLOW:ORANGE,HUD_EDGE);
+        menuPortrait(gamePlayerSpecies(g),34,40,30,CYAN);
+        menuPortrait(enemy,192,40,30,ORANGE);
+        centeredLabel(&leader,42,gamePlayerName(g),WHITE,false);
+        centeredLabel(&rival,42,starters[enemy].name,WHITE,false);
+
+        panel(89,33,78,53,HUD_EDGE,HUD_INK);
+        char label[24],score[2];
+        snprintf(label,sizeof(label),"ROUND %d",g->duelRound);
+        center(38,label,MUTED,1);
+        score[0]='0'+g->playerRounds;score[1]='\0';
+        text(101,49,score,CYAN,2);
+        score[0]='0'+g->rivalRounds;
+        text(143,49,score,ORANGE,2);
+        rect(124,56,8,2,MENU_SILVER);
+        roundPips(98,68,g->playerRounds,CYAN);
+        roundPips(140,68,g->rivalRounds,ORANGE);
+        text(98,76,g->mode==MODE_TEAM?"NOS":"VOCE",MUTED,1);
+        textRight(158,76,"CPU",MUTED);
+        if(more && gameStage(g)>0) center(89,"EVOLUCAO MANTIDA",GREEN,1);
     }
-    if(won && !more) {
+    if(won && gameIsHorde(g->mode)) {
         rect(211,40,3,19,MENU_GOLD_DARK);
         rect(205,45,15,7,MENU_GOLD_DARK);
         rect(211,40,3,15,YELLOW);
@@ -959,12 +990,16 @@ void nativeHudDraw(const Game *g) {
 }
 void nativeHudDrawOverlay(const Game *g,int displayTicks) {
     static int previousOverlay=-1;
-    static unsigned titleTicks;
+    static unsigned titleTicks,resultTicks;
     static bool titleWasActive;
     int count=gameIntroCount(g),overlayState=(int)g->state*16;
     if(g->state==STATE_FIGHT)
         overlayState+=count?count:g->roundDelay?4:g->cpuWindup?5:g->frameCounter<15?6:0;
-    if(g->state==STATE_RESULT)overlayState+=g->result;
+    bool duelResult=g->state==STATE_RESULT && !gameIsHorde(g->mode);
+    if(!duelResult) resultTicks=0;
+    else if(resultTicks<20) resultTicks+=displayTicks;
+    bool showRoundScore=resultTicks>=20;
+    if(g->state==STATE_RESULT) overlayState+=g->result+(showRoundScore?4:0);
     bool title=g->state==STATE_TITLE || g->state==STATE_OPTIONS;
     bool changed=overlayState!=previousOverlay;
     unsigned oldTicks=titleTicks;
@@ -984,9 +1019,17 @@ void nativeHudDrawOverlay(const Game *g,int displayTicks) {
             panel(9,8,238,23,SELECTED,DARK);
             rect(13,12,2,15,ORANGE);rect(241,12,2,15,CYAN);
             center(16,names,WHITE,1);
-            panel(109,37,38,34,BORDER,DARK);
-            rect(114,39,28,1,CYAN);
-            center(42,digit,YELLOW,3);
+            int digitY=37;
+            if(!gameIsHorde(g->mode)) {
+                char round[12];
+                snprintf(round,sizeof(round),"ROUND %d",g->duelRound);
+                panel(96,31,64,12,BORDER,DARK);
+                center(34,round,CYAN,1);
+                digitY=45;
+            }
+            panel(109,digitY,38,34,BORDER,DARK);
+            rect(114,digitY+2,28,1,CYAN);
+            center(digitY+5,digit,YELLOW,3);
         } else if(g->roundDelay) {
             char wave[40];
             snprintf(wave,sizeof(wave),"ONDA %d/%d - %s",g->wave,WAVE_COUNT,gameWaveName(g));
@@ -1008,6 +1051,12 @@ void nativeHudDrawOverlay(const Game *g,int displayTicks) {
     else if(g->state==STATE_RESULT) {
         panel(64,8,128,24,g->result==RESULT_WIN?GREEN:BORDER,DARK);
         center(16,resultLabel(g),g->result==RESULT_WIN?YELLOW:WHITE,1);
+        if(showRoundScore) {
+            char score[24];
+            snprintf(score,sizeof(score),"ROUND %d  %d - %d",g->duelRound,g->playerRounds,g->rivalRounds);
+            panel(72,33,112,14,BORDER,DARK);
+            center(37,score,CYAN,1);
+        }
     }
     size_t start=firstRow*256;
     DC_FlushRange(overlayPixels+start,sizeof(overlayPixels)-start);

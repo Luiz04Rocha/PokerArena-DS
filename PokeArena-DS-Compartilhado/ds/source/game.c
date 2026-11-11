@@ -19,6 +19,10 @@ static void styledImpact(Game *g,int x,int y,Element element,bool hit,uint8_t fi
 static void impact(Game *g,int x,int y,Element element,bool hit) {
     styledImpact(g,x,y,element,hit,0);
 }
+static uint8_t fireImpactStyle(int species,int style,Element element) {
+    if(element!=ELEMENT_FIRE || species%STARTER_COUNT || style>FX_FIRE_ULT) return 0;
+    return (uint8_t)(1+style+5*(species/STARTER_COUNT));
+}
 static void cast(Game *g,int who,const MoveDef *m,int slot) {
     VisualCast *v=&g->casts[who];
     v->x=v->originX=who?g->enemyX:g->playerX;
@@ -237,11 +241,12 @@ void gameAttack(Game *g, int slot) {
                  arenaSweep(g->playerX,g->playerY,g->enemyX,g->enemyY,0,NULL)==ARENA_PATH_FULL;
     g->lastHit=hitEnemy || hitRival;
     if(!g->lastHit) return;
+    uint8_t fireStyle=fireImpactStyle(g->casts[0].species,g->casts[0].style,move->element);
     g->ultimateCharge = clampInt(g->ultimateCharge + 9, 0, ULT_MAX);
-    if(hitRival) damageRival(g,damage,move->element,0);
+    if(hitRival) damageRival(g,damage,move->element,fireStyle);
     if(hitEnemy) {
         g->enemyHurtAnim=5;
-        impact(g,g->enemyX,g->enemyY,move->element,true);
+        styledImpact(g,g->enemyX,g->enemyY,move->element,true,fireStyle);
         damageEnemy(g,guardedDamage(g,damage));
     }
 }
@@ -286,7 +291,7 @@ static uint32_t integerSqrt(uint32_t n) {
     }
     return result;
 }
-static void beginDash(Game *g,int who,const MoveDef *m,int damage) {
+static DashAction dashAction(const Game *g,int who,const MoveDef *m,int damage) {
     int x=who?g->enemyX:g->playerX,y=who?g->enemyY:g->playerY;
     int dx=who?g->cpuAimX-x:g->faceX*256,dy=who?g->cpuAimY-y:g->faceY*256;
     int length=(int)integerSqrt((uint32_t)(dx*dx+dy*dy));
@@ -297,7 +302,15 @@ static void beginDash(Game *g,int who,const MoveDef *m,int damage) {
     tx=clampInt(tx,ARENA_LEFT*POS_SCALE,ARENA_RIGHT*POS_SCALE);
     ty=clampInt(ty,ARENA_TOP*POS_SCALE,ARENA_BOTTOM*POS_SCALE);
     int stop=arenaSweep(x,y,tx,ty,ARENA_ACTOR_MARGIN,NULL);
-    g->dashes[who]=(DashAction){DASH_TICKS,x,y,arenaAt(x,tx,stop),arenaAt(y,ty,stop),damage,m->range,false};
+    return (DashAction){DASH_TICKS,x,y,arenaAt(x,tx,stop),arenaAt(y,ty,stop),damage,m->range,false};
+}
+static void beginDash(Game *g,int who,const MoveDef *m,int damage) {
+    g->dashes[who]=dashAction(g,who,m,damage);
+}
+void gameCpuDashPreview(const Game *g,const MoveDef *move,int *x,int *y) {
+    DashAction dash=dashAction(g,1,move,0);
+    *x=dash.targetX;
+    *y=dash.targetY;
 }
 /* Progress in 256ths of the full path, shared by collision and the trail. */
 int gameDashProgress(int halfTicks) {
@@ -323,9 +336,10 @@ static void updateDashes(Game *g) {
            arenaSweep(*x,*y,tx,ty,0,NULL)==ARENA_PATH_FULL) {
             d->hit=true;
             Element element=who?starters[gameEnemySpecies(g)].moves[g->cpuMove].element:gameMoveDef(g,2)->element;
-            if(who)damagePlayer(g,d->damage,element,0);
+            uint8_t fireStyle=fireImpactStyle(g->casts[who].species,g->casts[who].style,element);
+            if(who)damagePlayer(g,d->damage,element,fireStyle);
             else {
-                g->lastHit=1;g->enemyHurtAnim=5;impact(g,g->enemyX,g->enemyY,element,true);
+                g->lastHit=1;g->enemyHurtAnim=5;styledImpact(g,g->enemyX,g->enemyY,element,true,fireStyle);
                 g->ultimateCharge=clampInt(g->ultimateCharge+9,0,ULT_MAX);soundEvent(g,2);
                 damageEnemy(g,guardedDamage(g,d->damage));
             }
@@ -337,7 +351,8 @@ static void updateDashes(Game *g) {
             g->lastHit=1;
             g->ultimateCharge=clampInt(g->ultimateCharge+9,0,ULT_MAX);
             soundEvent(g,2);
-            damageRival(g,d->damage,gameMoveDef(g,2)->element,0);
+            Element element=gameMoveDef(g,2)->element;
+            damageRival(g,d->damage,element,fireImpactStyle(g->casts[0].species,g->casts[0].style,element));
             if(g->state!=STATE_FIGHT) return;
         }
     }
@@ -405,7 +420,7 @@ static void updateProjectiles(Game *g,int playerOldX,int playerOldY,int enemyOld
         int ty=arenaAt(oldY,p->mine?g->enemyY:g->playerY,stop[i]);
         bool targetHit=stop[i] && segmentHit(p->prevX-oldX,p->prevY-oldY,x-tx,y-ty,0,0,12) &&
                        arenaSweep(x,y,tx,ty,0,NULL)==ARENA_PATH_FULL;
-        uint8_t fireStyle=p->species==0 && p->element==ELEMENT_FIRE && p->style<=FX_FIRE_ULT?p->style+1:0;
+        uint8_t fireStyle=fireImpactStyle(p->species,p->style,p->element);
         if (p->mine && g->enemyHp && g->enemyDodgeTimer == 0 && targetHit) {
             p->life = 0;
             g->lastHit = 1; g->enemyHurtAnim = 5;
@@ -463,7 +478,7 @@ static void cpu(Game *g) {
             if(m->kind!=MOVE_PROJECTILE&&m->kind!=MOVE_DASH&&
                inRange(g->playerX,g->playerY,g->cpuAimX,g->cpuAimY,m->range) &&
                arenaSweep(g->enemyX,g->enemyY,g->playerX,g->playerY,0,NULL)==ARENA_PATH_FULL)
-                damagePlayer(g,damage,m->element,0);
+                damagePlayer(g,damage,m->element,fireImpactStyle(g->casts[1].species,g->casts[1].style,m->element));
             g->enemyCooldown=cpuProfiles[gameEnemySpecies(g)].cooldown;
             if(gameIsHorde(g->mode)) {
                 if(g->wave==1) g->enemyCooldown+=14;
