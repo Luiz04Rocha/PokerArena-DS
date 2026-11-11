@@ -47,7 +47,7 @@ static volatile unsigned sceneUploadLate,sceneUploadEndLine,sceneTailLights;
 static volatile unsigned sceneGroundReactions;
 static volatile unsigned sceneResultReactions;
 static volatile unsigned sceneCelebrations,sceneTears,sceneDodgeGhosts,sceneImpactRings;
-static uint32_t decorList[4096] __attribute__((aligned(4)));
+static uint32_t decorList[4608] __attribute__((aligned(4)));
 static bool recording;
 static unsigned listWords,decorVertices,decorPolygons;
 static int lightingMode=4,period=1;
@@ -76,7 +76,9 @@ static int spriteTint(int value,int ownLight) {
     return RGB15(((value&31)*ownLight+(tint&31)*rest)/256,(((value>>5)&31)*ownLight+((tint>>5)&31)*rest)/256,(((value>>10)&31)*ownLight+((tint>>10)&31)*rest)/256);
 }
 static void recordCommand(uint32_t command,uint32_t a,uint32_t b,int count) {
-    if(listWords+(unsigned)count+1>=4096){++sceneTextureFailures;return;}
+    if(listWords+(unsigned)count+1>=sizeof(decorList)/sizeof(decorList[0])){
+        ++sceneTextureFailures;return;
+    }
     decorList[++listWords]=command;
     if(count>0)decorList[++listWords]=a;
     if(count>1)decorList[++listWords]=b;
@@ -252,6 +254,14 @@ static void pondBanks(void) {
         ellipse(p->x,p->y,p->rx,p->ry,2,RGB15(13,23,22));
         ellipse(p->x+1,p->y-1,p->rx-2,p->ry-2,3,RGB15(6,17,22));
         ellipse(p->x-3,p->y-1,p->rx-8,p->ry-4,4,RGB15(8,20,25));
+        beginPrimitive(GL_TRIANGLES);
+        for(int stem=0;stem<7;++stem) {
+            int x=p->x-p->rx+3+stem*2,y=p->y+stem%3-4;
+            int height=7+stem%3*2;
+            color(stem%2?RGB15(14,23,11):RGB15(9,17,9));
+            worldVertex(x-1,y,3);worldVertex(x+1,y,3);worldVertex(x-2,y,height);
+        }
+        endPrimitive();
     }
 }
 static void waterRipples(void) {
@@ -279,36 +289,49 @@ static void stoneSurface(int x0,int x1,int y0,int y1,int h0,int h1,int shade) {
 }
 static void stoneBlock(int x,int y,int w,int d,int bottom,int top) {
     stoneSurface(x,x+w,y+d,y+d,bottom,top,RGB15(11,14,15));
-    color(RGB15(9,12,14));
-    worldVertex(x+w,y,bottom);worldVertex(x+w,y+d,bottom);
-    worldVertex(x+w,y+d,top);worldVertex(x+w,y,top);
-    color(RGB15(13,17,17));
-    worldVertex(x,y,bottom);worldVertex(x,y+d,bottom);
-    worldVertex(x,y+d,top);worldVertex(x,y,top);
     stoneSurface(x,x+w,y,y+d,top,top,RGB15(21,23,19));
 }
 static void arenaEntrance(void) {
     noTexture();
     beginPrimitive(GL_QUADS);
-    /* Keep the threshold beyond the north edge of the playable area. */
-    stoneSurface(104,152,18,47,1,1,RGB15(12,16,15));
+    /* Raised masonry ends before the fighters' northern movement limit. */
+    stoneBlock(103,16,50,19,0,7);
+    stoneBlock(101,35,54,4,0,5);
+    stoneBlock(99,39,58,5,0,3);
     for(int row=0;row<4;++row) {
         for(int col=0;col<4;++col) {
-            int x=106+col*11+(row&1)*2;
-            int y=20+row*6;
+            int x=106+col*11+(row&1);
+            int y=17+row*4;
             int light=(row+col*2)%3;
-            stoneSurface(x,x+10,y,y+5,2,2,RGB15(17+light,20+light,17+light));
+            stoneSurface(x,x+10,y,y+3,8,8,RGB15(18+light,21+light,18+light));
         }
     }
     for(int x=102;x<=144;x+=42) {
-        stoneBlock(x-2,34,14,12,0,3);
+        stoneBlock(x-2,34,14,10,0,3);
         stoneBlock(x,36,10,8,3,12);
         stoneBlock(x-1,35,12,10,12,15);
         stoneSurface(x+1,x+9,37,41,16,16,RGB15(16,22,13));
+        stoneSurface(x+1,x+8,45,45,6,7,RGB15(8,12,12));
     }
     endPrimitive();
 }
+static void canopyShadows(void) {
+    static const int anchors[][2]={{5,72},{250,78},{5,126},{251,134}};
+    noTexture();
+    for(unsigned i=0;i<sizeof(anchors)/sizeof(anchors[0]);++i) {
+        int x=anchors[i][0],y=anchors[i][1];
+        color(RGB15(11,17,13));
+        beginPrimitive(GL_QUAD_STRIP);
+        for(int point=-3;point<=3;++point) {
+            int width=20-point*point*2;
+            worldVertex(x-width,y+point*4,1);
+            worldVertex(x+width,y+point*4,1);
+        }
+        endPrimitive();
+    }
+}
 static void decor(void) {
+    canopyShadows();
     arenaEntrance();
     pondBanks();
     for(int i=0;i<arenaPropCount;++i) {
@@ -441,9 +464,12 @@ static void actor(int id,int species,int requested,int facing,uint32_t serial,in
             }
         }
     }
-    const NativeAnim *a=&nativeSpecies[species].anim[anim];
-    /* Idle sheets can shift the feet. In combat, keep their stance and animate the body. */
-    int frame=anim==NATIVE_IDLE && !reaction && !previewSize?0:visualFrame(a->durations,a->frames,elapsed,loop);
+    bool standing=anim==NATIVE_IDLE && !reaction && !previewSize;
+    /* Blink briefly from the grounded frame. The authored idle clips include hops. */
+    unsigned blinkPhase=((unsigned)elapsed+id*71u+species*19u)%211u;
+    bool blink=standing && elapsed>=20 && (facing==2 || facing==6) && blinkPhase>=206;
+    const NativeAnim *a=&nativeSpecies[species].anim[blink?NATIVE_BLINK:anim];
+    int frame=standing?0:visualFrame(a->durations,a->frames,elapsed,loop);
     int index=facing*a->frames+frame;
     const int8_t *anchor=a->anchors?a->anchors+4*index:NULL;
     if(anim==NATIVE_CELEBRATE && anchor) {
@@ -467,8 +493,8 @@ static void actor(int id,int species,int requested,int facing,uint32_t serial,in
         breath=(4096-cosLerp(phase))*p->idleBlend*3/640;
         if(breath) ++sceneIdleBreaths;
     }
-    int bottomQ8=sy*256+footOffset*breath/a->sourceSize;
     int heightQ8=height*256+breath;
+    int bottomQ8=groundY(y)*256+footOffset*heightQ8/a->sourceSize;
     if(anchor) x-=anchor[0]*width/a->sourceSize;
     if(period==3&&a->flame) {
         const uint8_t *point=a->flame+2*index;
@@ -823,8 +849,19 @@ void sceneDraw(const Game *g,const Game *old,int half,int displayTicks) {
     int focusX=g->enemyHp || !g->rival.hp?enemyX:rivalX;
     int focusY=g->enemyHp || !g->rival.hp?enemyY:rivalY;
     int ultimateTicks=g->lastAttack==4?g->attackAnim:0;
+    int partnerX=visualLerp(old->partnerX,g->partnerX,frozen?2:half)/POS_SCALE;
+    int partnerY=visualLerp(old->partnerY,g->partnerY,frozen?2:half)/POS_SCALE;
+    VisualCameraPoint fighters[ACTOR_COUNT]={{playerX,playerY}};
+    int fighterCount=0;
+    if(g->state==STATE_FIGHT) {
+        fighterCount=1;
+        if(g->enemyHp) fighters[fighterCount++]=(VisualCameraPoint){enemyX,enemyY};
+        if(g->partnerHp) fighters[fighterCount++]=(VisualCameraPoint){partnerX,partnerY};
+        if(g->rival.hp) fighters[fighterCount++]=(VisualCameraPoint){rivalX,rivalY};
+    }
+    if(newBattle) camera=(VisualCamera){0};
     for(int i=0;i<displayTicks;++i)
-        visualCameraStep(&camera,playerX,playerY,focusX,focusY,g->state==STATE_FIGHT,frozen,ultimateTicks);
+        visualCameraStep(&camera,fighters,fighterCount,g->introTicks,frozen,ultimateTicks);
     glMatrixMode(GL_PROJECTION);glLoadIdentity();glOrthof32(inttof32(-2),inttof32(2),-6144,6144,inttof32(-4),inttof32(4));
     glMatrixMode(GL_MODELVIEW);glLoadIdentity();
     glScalef32(camera.zoom*16,camera.zoom*16,inttof32(1));
@@ -921,8 +958,6 @@ void sceneDraw(const Game *g,const Game *old,int half,int displayTicks) {
         int enemyReaction=g->mode==MODE_TEAM && !g->enemyHp?-1:-reaction;
         actor(1,enemySpecies,g->enemyHurtAnim?3:g->enemyMoving?1:0,enemyFacing,g->casts[1].serial,enemyX,enemyY,fight?g->enemyDodgeTimer:0,0,enemyReaction,enemyStrike);
         if(g->partnerHp>0) {
-            int partnerX=visualLerp(old->partnerX,g->partnerX,frozen?2:half)/POS_SCALE;
-            int partnerY=visualLerp(old->partnerY,g->partnerY,frozen?2:half)/POS_SCALE;
             if(team) teamMarker(partnerX,partnerY,true);
             bool targetsRival=g->rival.hp && (g->rival.aimAtPartner || !g->enemyHp);
             int facing=visualTargetFacing(poses[2].facing,(targetsRival?rivalX:focusX)-partnerX,(targetsRival?rivalY:focusY)-partnerY);

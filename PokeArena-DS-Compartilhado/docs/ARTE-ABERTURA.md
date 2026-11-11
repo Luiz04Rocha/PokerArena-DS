@@ -2,6 +2,8 @@
 
 Na v0.26, a abertura ganhou a praça em pixel art de `ds/assets/title-route.png`, criada por `ds/tools/build_title_route.py` na resolução de 256 × 192. As áreas livres correspondem aos trajetos dos quatro Pokémon. O script `ds/tools/build_title.py` prepara a praça e a logo para a ROM.
 
+Na v0.39, a praça ganhou um piso elevado com fileiras em perspectiva, uma ponte de madeira com corrimãos e uma nascente sobre uma plataforma de pedra. Copas, sombras frias e as quatro rotas em profundidades diferentes acompanham a câmera inclinada. A espuma e os reflexos da água são animados na ROM.
+
 A floresta das versões anteriores foi criada com o gerador de imagens integrado, usando a captura enviada por Luiz como referência de composição. O original está em `ds/assets/title-forest.png`. A partir da v0.24, o mesmo gerador foi usado para recortar a logo enviada por Luiz. O recorte transparente está em `ds/assets/title-logo.png`.
 
 ## Prompt da floresta

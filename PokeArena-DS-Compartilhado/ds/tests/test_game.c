@@ -553,6 +553,12 @@ static void testEffectsBufferAndCamera(void) {
     g=fight(MODE_VS);g.actionLock=2;
     gameUpdate(&g,IN_A);assert(g.bufferedMove==0&&g.moveCooldowns[0]==0);
     gameUpdate(&g,0);assert(g.moveCooldowns[0]>0&&g.bufferedMove==-1);
+    g=fight(MODE_VS);
+    gameUpdate(&g,IN_L|IN_B);assert(g.bufferedMove==-1);
+    while(g.dodgeTimer>3) gameUpdate(&g,0);
+    gameUpdate(&g,IN_B);assert(g.bufferedMove==1&&!g.casts[0].serial);
+    while(g.dodgeTimer) gameUpdate(&g,0);
+    assert(g.moveCooldowns[1]>0&&g.casts[0].serial==1&&g.bufferedMove==-1);
     g=fight(MODE_VS);g.enemyX=g.playerX;g.enemyY=g.playerY;g.enemyDodgeTimer=10;
     int hp=g.enemyHp;gameAttack(&g,1);assert(g.enemyHp==hp&&!g.lastHit&&!g.ultimateCharge);
     g=fight(MODE_VS);gameAttack(&g,2);gameUpdate(&g,0);gameUpdate(&g,IN_L);
@@ -567,23 +573,33 @@ static void testEffectsBufferAndCamera(void) {
     uint32_t randomState=123456u;unsigned periods=0;
     for(int i=0;i<128;++i){int t=visualRandomPeriod(&randomState);assert(t>=0&&t<4);periods|=1u<<t;}
     assert(periods==15);
+    const VisualCameraPoint duel[]={{80,130},{176,130}};
     VisualCamera c={0};
-    for(int i=0;i<120;++i)visualCameraStep(&c,80,130,176,130,true,false,0);
-    assert(c.zoom>=305&&c.zoom<=307&&c.x<0);
+    visualCameraStep(&c,duel,2,INTRO_TICKS,false,0);
+    assert(c.zoom==252);
+    for(int i=0;i<120;++i)visualCameraStep(&c,duel,2,0,false,0);
+    assert(c.zoom==304&&c.x<0);
     VisualCamera steady={0};
-    for(int i=0;i<120;++i)visualCameraStep(&steady,128,130,140+i%20,130,true,false,0);
+    for(int i=0;i<120;++i) {
+        const VisualCameraPoint nearby[]={{128,130},{140+i%20,130}};
+        visualCameraStep(&steady,nearby,2,0,false,0);
+    }
     assert(steady.x==0); /* Nearby CPU movement does not swing the camera. */
-    VisualCamera wide={0};
-    for(int i=0;i<120;++i)visualCameraStep(&wide,20,130,236,130,true,false,0);
-    assert(wide.x==0&&wide.zoom==218);
-    VisualCamera frozen=c;visualCameraStep(&c,20,58,236,176,true,true,12);
+    const VisualCameraPoint corners[]={{ARENA_LEFT,ARENA_TOP},{ARENA_RIGHT,ARENA_BOTTOM}};
+    VisualCamera frozen=c;visualCameraStep(&c,corners,2,0,true,12);
     assert(c.x==frozen.x&&c.y==frozen.y&&c.zoom==frozen.zoom);
-    for(int i=0;i<18;++i)visualCameraStep(&c,80,130,176,130,true,false,12);
-    assert(c.zoom>frozen.zoom && c.zoom<=331);
-    for(int i=0;i<120;++i)visualCameraStep(&c,ARENA_LEFT,ARENA_TOP,ARENA_RIGHT,ARENA_BOTTOM,true,false,12);
-    int top=96+((visualGroundY(ARENA_TOP)-57-96)*256-c.y)*c.zoom/65536;
-    int bottom=96+((visualGroundY(ARENA_BOTTOM)+9-96)*256-c.y)*c.zoom/65536;
-    assert(top>=9 && bottom<=183 && (ARENA_RIGHT-ARENA_LEFT)*c.zoom/256<=204);
+    for(int i=0;i<18;++i)visualCameraStep(&c,duel,2,0,false,12);
+    assert(c.zoom>frozen.zoom && c.zoom<=328);
+    /* The outer fighters remain framed even on the first step of a 2 vs 2 split. */
+    const VisualCameraPoint team[]={{80,130},{176,130},{ARENA_LEFT,ARENA_TOP},{ARENA_RIGHT,ARENA_BOTTOM}};
+    for(int i=0;i<120;++i) {
+        visualCameraStep(&c,team,4,0,false,12);
+        int left=128+((ARENA_LEFT-24-128)*256-c.x)*c.zoom/65536;
+        int right=128+((ARENA_RIGHT+24-128)*256-c.x)*c.zoom/65536;
+        int top=96+((visualGroundY(ARENA_TOP)-54-96)*256-c.y)*c.zoom/65536;
+        int bottom=96+((visualGroundY(ARENA_BOTTOM)+10-96)*256-c.y)*c.zoom/65536;
+        assert(left>=2 && right<=254 && top>=2 && bottom<=190);
+    }
     int edgeX=128*POS_SCALE,edgeY=130*POS_SCALE;
     arenaMove(&edgeX,&edgeY,200*POS_SCALE,0);
     assert(edgeX==ARENA_RIGHT*POS_SCALE);

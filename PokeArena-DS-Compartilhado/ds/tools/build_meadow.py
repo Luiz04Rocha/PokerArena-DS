@@ -12,10 +12,10 @@ WIDTH, HEIGHT = 256, 128
 CENTER_X, CENTER_Y = 128, 120
 RIM_X, RIM_Y = 119, 80
 COLORS = [
-    (44, 85, 70), (60, 111, 78), (79, 133, 86), (97, 150, 94),
-    (111, 161, 98), (125, 169, 105), (143, 180, 115), (145, 163, 105),
-    (161, 174, 115), (174, 179, 122), (192, 188, 133), (97, 115, 99),
-    (127, 140, 112), (154, 163, 132), (180, 186, 148), (202, 202, 167),
+    (44, 85, 70), (60, 111, 78), (76, 133, 90), (92, 149, 97),
+    (108, 160, 102), (123, 169, 109), (140, 179, 118), (148, 159, 106),
+    (168, 172, 116), (179, 177, 121), (195, 186, 132), (94, 115, 107),
+    (123, 140, 118), (152, 162, 135), (179, 184, 150), (202, 202, 167),
 ]
 
 
@@ -44,13 +44,13 @@ def paint_ground(rng):
             rim = rim_distance(wx, wy)
             waves = math.sin(wx * .035 + math.sin(wy * .046)) + math.sin(wy * .052 - wx * .019)
             patch = math.sin(wx * .075 + wy * .057) * math.cos(wy * .089 - wx * .035)
-            grass = (108 + 7 * waves, 154 + 6 * waves, 96 + 3 * waves)
-            soil = (156 + 5 * waves, 173 + 3 * waves, 116 + 2 * waves)
+            grass = (104 + 8 * waves, 152 + 6 * waves, 99 + 4 * waves)
+            soil = (173 + 5 * waves, 175 + 3 * waves, 118 + 2 * waves)
             worn = clamp((1.09 - rim + patch * .045) * 3.2) * .82
             path = clamp(1 - abs(wx - entry_x(wy)) / 17)
             worn = max(worn, path * clamp((rim - .78) * 5) * .85)
             # Keep texture variation subtle underneath moving sprites and effects.
-            noise = rng.uniform(-2.5, 2.5)
+            noise = rng.uniform(-1.5, 1.5)
             pixels[x, y] = tuple(round(g + (s - g) * worn + noise) for g, s in zip(grass, soil))
     return image
 
@@ -78,6 +78,14 @@ def paint_rim(draw, rng):
         wx = entry_x(wy) + rng.uniform(-12, 12)
         x, y = world_pixel(wx, wy)
         draw.line((x, y, x + rng.randrange(2), y), fill=COLORS[rng.choice((7, 9, 12, 13, 14))])
+
+    # Broken paving connects the foot of the north steps to the dirt clearing.
+    for wy, offsets in ((47, (-19, -9, 1, 11)), (53, (-16, -5, 6, 15)), (59, (-9, 4))):
+        for offset in offsets:
+            x, y = world_pixel(CENTER_X + offset, wy)
+            draw.line((x, y + 1, x + 4, y + 1), fill=COLORS[11])
+            draw.line((x + 1, y - 1, x + 3, y - 1), fill=COLORS[14])
+            draw.line((x - 1, y, x + 4, y), fill=COLORS[13])
 
 
 def paint_turf(draw, rng):

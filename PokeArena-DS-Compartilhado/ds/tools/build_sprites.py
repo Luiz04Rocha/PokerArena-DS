@@ -16,6 +16,42 @@ CORE_ANIMS = ('Idle','Walk','Attack','Hurt')
 ANIMS = (*CORE_ANIMS,'Celebrate','Defeated')
 RESULT_CLIPS = {'Celebrate': ('Hop','Idle'), 'Defeated': ('Faint','Sleep','Hurt')}
 DIRS = tuple(range(8))
+TEXTURE_SIZE = 64
+GROUND_Y = 54  # Space for authored hops above the pivot and soles below it.
+# Profile eyelids for frame zero of the pinned SpriteCollab idle sheets.
+# Bounds are inclusive. The sample pixel supplies the face color, and the
+# mirror shift aligns the edit to the artist's left-facing profile.
+PROFILE_EYES = {
+    4: ((16, 11, 18, 13), (19, 12), -1),
+    7: ((20, 8, 21, 10), (19, 9), -1),
+    1: ((20, 18, 22, 19), (19, 19), -1),
+    25: ((23, 20, 24, 21), (22, 21), 0),
+    5: ((19, 20, 21, 21), (22, 21), 0),
+    8: ((15, 13, 17, 15), (18, 13), 0),
+    2: ((20, 14, 22, 15), (19, 15), -1),
+    26: ((24, 17, 25, 18), (23, 18), 0),
+    6: ((26, 11, 27, 12), (28, 13), 0),
+    9: ((22, 10, 23, 10), (25, 10), 0),
+    3: ((24, 16, 25, 17), (23, 16), 1),
+}
+
+def close_profile_eye(image,dex,direction):
+    if direction not in (2,6):
+        return
+    (left,top,right,bottom),(sample_x,sample_y),mirror_shift=PROFILE_EYES[dex]
+    if direction==6:
+        mirror=image.width-1+mirror_shift
+        left,right,sample_x=mirror-right,mirror-left,mirror-sample_x
+    if not (0<=left<=right<image.width and 0<=sample_x<image.width and
+            0<=top<=bottom<image.height and 0<=sample_y<image.height):
+        return
+    skin=image.getpixel((sample_x,sample_y))
+    if skin[3]<128:
+        return
+    for y in range(top,bottom+1):
+        for x in range(left,right+1):
+            if image.getpixel((x,y))[3]>=128:
+                image.putpixel((x,y),skin if y!=bottom else (0,0,0,255))
 
 def sprite_source(root, dex):
     ident = f'{dex:04d}'
@@ -62,10 +98,10 @@ def frame_canvas(image,size):
     canvas=Image.new('RGBA',(size,size)); canvas.paste(image,((size-image.width)//2,size-image.height))
     return canvas
 
-def flame_point(image,size):
+def flame_point(canvas):
     # Bright yellow is the flame core in the supplied fire-family sheets.
     # Measure before palette quantization, using the exact texture placement.
-    canvas=frame_canvas(image,size)
+    size=canvas.width
     points=[(x,y) for y in range(size) for x in range(size)
             if (lambda c:c[3]>=128 and c[0]>=245 and c[1]>=235 and c[2]<80)(canvas.getpixel((x,y)))]
     if not points:return [0,255]  # Flame occluded in this authored frame.
@@ -78,8 +114,8 @@ def marker(image, box, color):
             return index % tile.width, index // tile.width
     return None
 
-def pixels(image, palette, size=32, *, tiled=False):
-    canvas=frame_canvas(image,size)
+def pixels(canvas, palette, *, tiled=False):
+    size=canvas.width
     out=[]
     for r,g,b,a in canvas.get_flattened_data():
         out.append(0 if a<128 else 1+min(range(len(palette)),key=lambda i:sum((palette[i][j]-v)**2 for j,v in enumerate((r,g,b)))))
@@ -138,11 +174,13 @@ def main():
         palette=[tuple(q.getpalette()[i:i+3]) for i in range(0,45,3)]
         rgb555=[0]+[(r>>3)|((g>>3)<<5)|((b>>3)<<10) for r,g,b in palette]
         animations=[]
-        for name in ANIMS:
-            m=meta[name]; sheet=sheets[name]; fw,fh=m['frameWidth'],m['frameHeight']
-            count=len(m['durations'])
+        for name in (*ANIMS,'Blink'):
+            source_name='Idle' if name=='Blink' else name
+            m=meta[source_name]; sheet=sheets[source_name]; fw,fh=m['frameWidth'],m['frameHeight']
+            durations=[1] if name=='Blink' else m['durations']
+            count=len(durations)
             rows=sheet.height//fh
-            if count>16 or sheet.width!=fw*count or sheet.height%fh or rows not in (1,8):
+            if count>16 or sheet.width!=fw*len(m['durations']) or sheet.height%fh or rows not in (1,8):
                 raise ValueError(f'Invalid grid: {dex}/{name}')
             words=[];flame=[];anchors=[];starts=[]
             shadow_path=folder/m.get('shadow','')
@@ -152,29 +190,37 @@ def main():
             for layer in (shadow,offsets):
                 if layer and layer.size!=sheet.size:
                     raise ValueError(f'Invalid marker grid: {dex}/{name}')
-            marks=m.get('markers',[0,0,0])
+            marks=[0,0,0] if name=='Blink' else m.get('markers',[0,0,0])
             if any(not 0<=value<count for value in marks):
                 raise ValueError(f'Invalid action frame: {dex}/{name}')
-            times=[sum(m['durations'][:value]) for value in marks]
-            texture_size=64
+            times=[sum(durations[:value]) for value in marks]
             for direction in DIRS:
                 row=direction if rows==8 else 0
                 for frame in range(count):
                     box=(frame*fw,row*fh,(frame+1)*fw,(row+1)*fh)
                     image=sheet.crop(box)
-                    if not image.getchannel('A').getbbox():
+                    if name=='Blink' and rows==8:
+                        close_profile_eye(image,dex,direction)
+                    bounds=image.getbbox()
+                    if not bounds:
                         raise ValueError(f'Empty frame: {dex}/{name} direction {direction} frame {frame}')
+                    ground=marker(shadow,box,(255,255,255,255)) if shadow else (fw//2,bounds[3])
+                    if ground is None:
+                        raise ValueError(f'Missing ground marker: {dex}/{name}/{direction}/{frame}')
+                    dx=TEXTURE_SIZE//2-ground[0]
+                    dy=GROUND_Y-ground[1]
+                    if not (0<=bounds[0]+dx<=bounds[2]+dx<=TEXTURE_SIZE and
+                            0<=bounds[1]+dy<=bounds[3]+dy<=TEXTURE_SIZE):
+                        raise ValueError(f'Artwork outside native texture: {dex}/{name}/{direction}/{frame}')
+                    canvas=Image.new('RGBA',(TEXTURE_SIZE,TEXTURE_SIZE))
+                    canvas.paste(image,(dx,dy))
                     starts.append(len(words))
-                    words.extend(pack_frame(pixels(image,palette,texture_size)))
-                    if shadow:
-                        ground=marker(shadow,box,(255,255,255,255))
-                        if ground is None:
-                            raise ValueError(f'Missing ground marker: {dex}/{name}/{direction}/{frame}')
-                        head=marker(offsets,box,(0,0,0,255)) if offsets else None
-                        head=head or (marker(offsets,box,(255,255,255,255)) if offsets else None)
-                        head=head or (ground[0],ground[1]-11)
-                        anchors.extend((ground[0]-fw//2,fh-ground[1],head[0]-ground[0],ground[1]-head[1]))
-                    if dex in (4,5,6):flame.extend(flame_point(image,texture_size))
+                    words.extend(pack_frame(pixels(canvas,palette)))
+                    head=marker(offsets,box,(0,0,0,255)) if offsets else None
+                    head=head or (marker(offsets,box,(255,255,255,255)) if offsets else None)
+                    head=head or (ground[0],ground[1]-11)
+                    anchors.extend((0,TEXTURE_SIZE-GROUND_Y,head[0]-ground[0],ground[1]-head[1]))
+                    if dex in (4,5,6):flame.extend(flame_point(canvas))
                     frames_total+=1
             symbol=f's{dex}_{name.lower()}'; array(symbol,words)
             starts.append(len(words))
@@ -189,13 +235,9 @@ def main():
                 if any(not -128<=value<=127 for value in anchors):
                     raise ValueError(f'Anchor outside native range: {dex}/{name}')
                 lines.append(f'static const int8_t {anchor_symbol}[] = {{'+','.join(map(str,anchors))+'};')
-            feet=[]
-            for direction in DIRS:
-                row=direction if rows==8 else 0
-                first=sheet.crop((0,row*fh,fw,(row+1)*fh)).getbbox()
-                feet.append(fh-first[3] if first else 0)
-            animations.append('{'+symbol+','+symbol+'_frames,'+str(count)+',{'+','.join(map(str,m['durations']))+'},'+str(max(64,fw,fh))+',{'+','.join(map(str,feet))+'},'+','.join(map(str,times))+','+flame_symbol+','+anchor_symbol+'}')
-        symbol=f's{dex}_portrait'; array(symbol,pixels(portrait,palette,tiled=True))
+            feet=[TEXTURE_SIZE-GROUND_Y]*len(DIRS)
+            animations.append('{'+symbol+','+symbol+'_frames,'+str(count)+',{'+','.join(map(str,durations))+'},'+str(TEXTURE_SIZE)+',{'+','.join(map(str,feet))+'},'+','.join(map(str,times))+','+flame_symbol+','+anchor_symbol+'}')
+        symbol=f's{dex}_portrait'; array(symbol,pixels(frame_canvas(portrait,32),palette,tiled=True))
         definitions.append('    {{'+','.join(f'0x{v:04x}' for v in rgb555)+'},{'+','.join(animations)+'},'+symbol+'}')
     lines.append('const NativeSpecies nativeSpecies[11] = {\n'+',\n'.join(definitions)+'\n};')
     out.parent.mkdir(parents=True,exist_ok=True)
@@ -204,7 +246,7 @@ def main():
     header.write_text('''#ifndef GENERATED_SPRITES_H
 #define GENERATED_SPRITES_H
 #include <stdint.h>
-enum { NATIVE_IDLE, NATIVE_WALK, NATIVE_ATTACK, NATIVE_HURT, NATIVE_CELEBRATE, NATIVE_DEFEATED, NATIVE_ANIM_COUNT };
+enum { NATIVE_IDLE, NATIVE_WALK, NATIVE_ATTACK, NATIVE_HURT, NATIVE_CELEBRATE, NATIVE_DEFEATED, NATIVE_BLINK, NATIVE_ANIM_COUNT };
 typedef struct {
     const uint16_t *pixels, *frameOffsets;
     uint8_t frames, durations[16], sourceSize, foot[8];

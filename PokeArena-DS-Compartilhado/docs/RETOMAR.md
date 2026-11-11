@@ -1,6 +1,6 @@
 # Retomar PokeArena DS
 
-Versão atual **0.29**, 6 de novembro de 2026. Jogo nativo em C/BlocksDS para Nintendo DSi XL.
+Versão atual **0.39**. Jogo nativo em C/BlocksDS para Nintendo DSi XL.
 
 ## Últimas instruções de Luiz
 
@@ -39,6 +39,10 @@ Na 0.27, a logo foi centralizada e o posto foi ajustado para abrir espaço para 
 Na 0.28, Luiz pediu uma arena um pouco maior, com pedras e troncos mais próximos das bordas. Os limites são x10 a x246 e y49 a y190. O centro fica livre para movimento e ataques, e as coberturas principais ficam nos lados. O anel, as trilhas e a vegetação acompanham a nova clareira.
 
 Na 0.29, Luiz pediu uma abertura com mais movimento. A casinha deu lugar a uma nascente. Folhas e reflexos animam o cenário, e os quatro Pokémon alternam caminhada e ações em uma rotação das onze formas disponíveis.
+
+Na 0.39, a praça de abertura e o campo de batalha ganharam novas camadas de cenário. A entrada da arena usa degraus em geometria 3D e o caminho segue no piso em pixel art. A câmera abre durante a contagem e se ajusta à posição dos lutadores, incluindo o parceiro e os dois rivais no 2 vs 2. Pressionar um golpe no fim da esquiva guarda o comando até ele poder sair.
+
+Os quadros das onze formas agora são montados a partir dos pixels originais, alinhados pelos marcadores de apoio do SpriteCollab. Durante a luta, a pose parada respira e pisca de perfil. A abertura mantém quatro Pokémon em circulação e alterna entre as onze formas. O HUD diferencia o golpe disponível, acionado e em recarga pelas cores, pelo texto e pela barra de progresso.
 
 O período é sorteado ao iniciar a batalha e vale também durante pausas e ondas. L/R na pausa demonstram os quatro horários. A opção SORTEIO restaura o período daquela partida.
 

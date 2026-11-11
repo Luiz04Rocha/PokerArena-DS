@@ -418,17 +418,26 @@ static void initTitleIcons(void) {
 }
 static void titleMenu(const Game *g) {
     static const char *labels[TITLE_TILE_COUNT]={"JOGAR","MULTIPLAYER","HORDA","OP\xC7\xD5" "ES"};
+    static const uint8_t accents[TITLE_TILE_COUNT]={GREEN,CYAN,ORANGE,MENU_SILVER};
     menuLandscape();
-    rect(0,0,256,7,MENU_SLATE);
-    rect(0,7,256,1,MENU_STEEL_BLUE);
+    rect(0,0,256,5,MENU_INK);
+    rect(10,4,236,1,MENU_STEEL_BLUE);
+    rect(116,4,24,1,CYAN);
     rect(0,159,256,12,MENU_GRID);
     for(int x=0;x<256;x+=10) rect(x,159,1,12,MENU_FRAME);
     rect(0,173,256,1,MENU_STEEL_BLUE);
+    rect(0,175,256,17,MENU_INK);
     for(int i=0;i<TITLE_TILE_COUNT;++i) {
         const HudButton *b=&titleTiles[i];
         bool selected=i==g->menuCursor;
         menuCard(b,0,selected);
-        rect(b->x+7,b->y+48,b->w-14,1,selected?MENU_BLUE_EDGE:MENU_STEEL_BLUE);
+        rect(b->x+4,b->y+51,b->w-8,b->h-55,selected?MENU_BLUE_FIELD:MENU_FIELD);
+        rect(b->x+8,b->y+48,b->w-16,1,selected?MENU_BLUE_EDGE:MENU_STEEL_BLUE);
+        rect(b->x+(b->w-18)/2,b->y+48,18,1,accents[i]);
+        rect(b->x+9,b->y+8,6,1,accents[i]);
+        rect(b->x+9,b->y+9,1,3,accents[i]);
+        rect(b->x+b->w-15,b->y+8,6,1,accents[i]);
+        rect(b->x+b->w-10,b->y+9,1,3,accents[i]);
         int iconX=b->x+(b->w-TITLE_ICON_WIDTH)/2,iconY=b->y+4;
         for(int y=0;y<TITLE_ICON_HEIGHT;++y) {
             uint8_t *row=canvas+(iconY+y)*256+iconX;
@@ -437,7 +446,7 @@ static void titleMenu(const Game *g) {
         }
         titleLabel(b,labels[i]);
     }
-    center(177,g->menuCursor==TITLE_MULTIPLAYER?"MULTIPLAYER LOCAL EM BREVE":"TOQUE OU USE O DIRECIONAL",WHITE,1);
+    center(180,g->menuCursor==TITLE_MULTIPLAYER?"MULTIPLAYER LOCAL EM BREVE":"TOQUE OU USE O DIRECIONAL",WHITE,1);
 }
 static void menuKey(int x,int y,int width,const char *label) {
     panel(x,y,width,14,MENU_STEEL_BLUE,MENU_SLATE);
@@ -525,9 +534,11 @@ static void initTitleCast(void) {
     }
     titlePaletteDirty=(1u<<STARTER_COUNT)-1;
 }
+static int titleArtColor(int red,int green,int blue);
 static void titleWalker(int slot,unsigned ticks,int x0,int y0,int x1,int y1) {
     static const uint16_t *cached[STARTER_COUNT];
     static uint16_t decoded[STARTER_COUNT][1024];
+    static uint8_t softShadow;
     static const uint8_t poses[]={NATIVE_IDLE,NATIVE_IDLE,NATIVE_ATTACK,NATIVE_CELEBRATE};
     TitleWalker *walker=&titleCast[slot];
     ticks+=walker->phase;
@@ -555,9 +566,11 @@ static void titleWalker(int slot,unsigned ticks,int x0,int y0,int x1,int y1) {
     int distance=TITLE_WALK_LEG-pause;
     int travel=returning?distance-progress:progress;
     int x=x0+(x1-x0)*travel/distance;
-    int y=y0+(y1-y0)*travel/distance;
+    int bend=12*travel*(distance-travel)/(distance*distance);
+    int y=y0+(y1-y0)*travel/distance+(returning?-bend:bend);
     int dx=x1-x0,dy=y1-y0;
-    int facing=visualDirection(returning?-dx:dx,returning?-dy:dy);
+    int slope=12*(distance-2*travel)/distance;
+    int facing=visualDirection(returning?-dx:dx,returning?slope-dy:dy+slope);
     int species=walker->species;
     int pose=progress?NATIVE_WALK:walker->pose;
     int poseTicks=step;
@@ -580,8 +593,11 @@ static void titleWalker(int slot,unsigned ticks,int x0,int y0,int x1,int y1) {
     const int8_t *anchor=anim->anchors?anim->anchors+4*index:NULL;
     int left=x-size/2-(anchor?anchor[0]*size/anim->sourceSize:0);
     int top=y-size+(anchor?anchor[1]:anim->foot[facing])*size/anim->sourceSize;
-    rect(x-5,y-1,10,3,TITLE_SHADOW);
-    rect(x-3,y+2,6,1,TITLE_SHADOW);
+    if(!softShadow) softShadow=titleArtColor(17,20,16);
+    int radius=(size+7)/8;
+    rect(x-radius,y,2*radius,3,softShadow);
+    rect(x-radius+2,y-1,2*radius-4,3,TITLE_SHADOW);
+    rect(x-radius+3,y+3,2*radius-6,1,softShadow);
     int startY=top<TITLE_SPRITE_ROW?TITLE_SPRITE_ROW-top:0;
     int startX=left<2?2-left:0;
     int endX=left+size>254?254-left:size;
@@ -617,13 +633,14 @@ static void titleAmbience(unsigned ticks) {
         {23,0,192},{43,74,218},{52,123,238},{30,164,255},
         {204,23,208},{218,96,232},{232,150,256},{200,183,277}
     };
-    static const uint8_t water[][2]={{211,88},{218,85},{236,81},{244,113},{234,159},{229,172}};
-    static uint8_t leafGreen,leafGold,leafDark,waterGlint;
+    static const uint8_t water[][2]={{210,89},{217,86},{236,81},{244,113},{236,159},{229,172}};
+    static uint8_t leafGreen,leafGold,leafDark,waterGlint,foam;
     if(!leafGreen) {
         leafGreen=titleArtColor(20,25,11);
         leafGold=titleArtColor(28,24,11);
         leafDark=titleArtColor(10,15,6);
         waterGlint=titleArtColor(17,25,26);
+        foam=titleArtColor(24,28,27);
     }
     for(unsigned i=0;i<sizeof(water)/sizeof(water[0]);++i) {
         unsigned phase=(ticks+i*13)%72;
@@ -632,6 +649,14 @@ static void titleAmbience(unsigned ticks) {
         int length=2+(phase<18?phase:36-phase)/5;
         for(int dx=0;dx<length;++dx) if(titleWaterPixel(x+dx,y))
             rect(x+dx,y,1,1,waterGlint);
+    }
+    /* Foam threads flow down the spring face and break into the pool. */
+    for(int i=0;i<3;++i) {
+        unsigned phase=(ticks/2+i*9)%28;
+        if(phase>=18) continue;
+        int x=213+i*2+(phase>9),y=74+phase*2/3;
+        for(int dy=0;dy<2;++dy) if(titleWaterPixel(x,y+dy))
+            rect(x,y+dy,1,1,i==1?foam:waterGlint);
     }
     for(unsigned i=0;i<sizeof(leaves)/sizeof(leaves[0]);++i) {
         unsigned phase=(ticks+leaves[i].phase)%leaves[i].period;
@@ -662,7 +687,10 @@ static void titleCover(int firstRow,unsigned ticks) {
     int pulse=(ticks/12)%8;
     int level=pulse<4?pulse:7-pulse;
     int y=173-(level==3);
-    panel(70,y,116,12,TITLE_SHADOW,TITLE_INK);
+    panel(66,y+2,124,13,TITLE_INK,TITLE_INK);
+    panel(66,y,124,13,TITLE_SHADOW,TITLE_INK);
+    rect(69,y+2,2,1,TITLE_PULSE+level);
+    rect(185,y+2,2,1,TITLE_PULSE+level);
     center(y+3,"TOQUE PARA COME\xC7" "AR",TITLE_PULSE+level,1);
 }
 static void matchup(const Game *g) {
@@ -772,7 +800,10 @@ static void battle(const Game *g) {
     bool evoReady=evolution==100 && gameStage(g)<gameFinalStage(g);
     panel(4,4,176,42,MENU_SILVER,MENU_SLATE);
     panel(184,4,68,42,MENU_SILVER,MENU_SLATE);
-    panel(7,7,34,34,CYAN,HUD_INK);
+    int elementColor=48+gameMoveDef(g,0)->element;
+    rect(7,43,170,1,MENU_STEEL_BLUE);
+    rect(187,43,62,1,MENU_STEEL_BLUE);
+    panel(7,7,34,34,elementColor,HUD_INK);
     portrait(gamePlayerSpecies(g),9,9,30);
     text(45,8,gamePlayerName(g),WHITE,1);
     snprintf(s,sizeof(s),"%d/%d",g->playerHp,hp);
@@ -785,12 +816,13 @@ static void battle(const Game *g) {
     const HudButton *evo=&hudButtons[6];
     panel(evo->x,evo->y,evo->w,evo->h,evoReady?MENU_BLUE_EDGE:MENU_STEEL_BLUE,evoReady?MENU_BLUE_FACE:MENU_INK);
     centeredLabel(evo,2,gameStage(g)==gameFinalStage(g)?"MAX":"EVO",evoReady?WHITE:MUTED,false);
-    text(203,8,"TEMPO",CYAN,1);
+    text(203,8,"TEMPO",MUTED,1);
     snprintf(s,sizeof(s),"%02d:%02d",seconds/60,seconds%60);
     bool duel=!gameIsHorde(g->mode);
     text(188,duel?17:22,s,seconds<=30?ORANGE:WHITE,2);
     if(duel) {
         snprintf(s,sizeof(s),"R%d  %d-%d",g->duelRound,g->playerRounds,g->rivalRounds);
+        rect(191,34,54,9,MENU_INK);
         text(218-(int)strlen(s)*3,35,s,CYAN,1);
     }
     panel(4,49,248,18,MENU_SILVER,MENU_SLATE);
@@ -822,15 +854,16 @@ static void battle(const Game *g) {
         int element=m->element;
         menuCard(b,22,ready||active);
         char key[2]={"ABXY"[i],0};
-        menuKey(b->x+6,b->y+9,19,key);
-        rect(b->x+7,b->y+27,16,2,48+element);
+        panel(b->x+6,b->y+8,19,17,active?YELLOW:ready?CYAN:MENU_STEEL_BLUE,MENU_SLATE);
+        text(b->x+12,b->y+13,key,ready||active?WHITE:MUTED,1);
+        rect(b->x+6,b->y+27,19,2,48+element);
         text(b->x+33,b->y+5,m->name,ready||active?WHITE:MUTED,1);
         if(active) {
             rect(b->x+3,b->y+3,2,b->h-6,YELLOW);
             text(b->x+33,b->y+20,"ACIONADO",YELLOW,1);
         } else if(ready) {
             text(b->x+33,b->y+16,kinds[m->kind],MUTED,1);
-            text(b->x+33,b->y+26,"PRONTO",WHITE,1);
+            text(b->x+33,b->y+26,"PRONTO",GREEN,1);
         }
         else {
             int t=(g->moveCooldowns[i]*10+GAME_HZ-1)/GAME_HZ;
@@ -847,10 +880,17 @@ static void battle(const Game *g) {
     bool ultimate=g->attackAnim && g->lastAttack==4;
     bool charged=g->ultimateCharge==100;
     menuCard(ult,0,charged||ultimate);
-    centeredLabel(ult,7,gameStage(g)>0?gameUltimateDef(g)->name:"ULTIMATE",charged?YELLOW:WHITE,true);
+    const char *ultimateName=gameStage(g)>0?gameUltimateDef(g)->name:"ULTIMATE";
+    int nameColor=charged?YELLOW:WHITE;
+    const char *space=strchr(ultimateName,' ');
+    if(space && (int)strlen(ultimateName)*6>ult->w-8) {
+        snprintf(s,sizeof(s),"%.*s",(int)(space-ultimateName),ultimateName);
+        centeredLabel(ult,4,s,nameColor,false);
+        centeredLabel(ult,12,space+1,nameColor,false);
+    } else centeredLabel(ult,7,ultimateName,nameColor,true);
     if(charged) strcpy(s,"R  PRONTO");
     else snprintf(s,sizeof(s),"R  %d%%",g->ultimateCharge);
-    centeredLabel(ult,18,s,charged?YELLOW:WHITE,true);
+    centeredLabel(ult,20,s,charged?YELLOW:WHITE,false);
     gauge(ult->x+9,ult->y+28,ult->w-18,4,g->ultimateCharge,100,charged?YELLOW:PURPLE);
     menuCard(pause,0,false);
     centeredLabel(pause,7,"PAUSA",WHITE,true);
