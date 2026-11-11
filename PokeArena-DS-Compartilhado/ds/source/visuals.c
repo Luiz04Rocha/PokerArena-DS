@@ -29,7 +29,7 @@ void visualCameraStep(VisualCamera *c,int px,int py,int ex,int ey,bool fight,boo
         int fitY=172*256/(bottom-top);
         int fit=fitX<fitY?fitX:fitY;
         zoom=clamp(210*256/(separation+36),218,307);
-        zoom=clamp(zoom+clamp(ultimateTicks,0,12)*2,218,fit);
+        zoom=clamp(zoom+clamp(ultimateTicks,0,12)*2,fit<218?fit:218,fit);
         int marginX=102*256*256/zoom,marginY=86*256*256/zoom;
         x=clamp((px-128)*256+(ex-px)*weight,(right-128)*256-marginX,(left-128)*256+marginX);
         y=clamp((visualGroundY((py*3+ey)/4)-116)*256,(bottom-96)*256-marginY,(top-96)*256+marginY);
@@ -92,6 +92,7 @@ void visualPoseStep(VisualPose *p,int species,int requested,int facing,uint32_t 
         p->facing = facing;
         p->rateRemainder = 0;
         p->walkGrace = 0;
+        p->idleBlend = 0;
         return;
     }
     if(p->once && p->elapsed<duration) {
@@ -102,6 +103,7 @@ void visualPoseStep(VisualPose *p,int species,int requested,int facing,uint32_t 
     if(requested == 1) p->walkGrace = 2;
     else if(p->walkGrace > 0) p->walkGrace -= delta;
     p->anim = requested == 1 || p->walkGrace > 0 ? 1 : 0;
+    p->idleBlend = clamp(p->idleBlend+(p->anim==0?delta:-2*delta),0,10);
     int *clock = p->anim == 1 ? &p->walkTime : &p->idleTime;
     p->elapsed = *clock;
     *clock += delta;

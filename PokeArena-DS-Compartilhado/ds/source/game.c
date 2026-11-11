@@ -7,14 +7,17 @@
 static int clampInt(int n, int lo, int hi) { return n < lo ? lo : n > hi ? hi : n; }
 static void decrement(int *n) { if (*n > 0) --*n; }
 static void soundEvent(Game *g,int event) { g->soundEvent=event; ++g->soundSerial; }
-static void impact(Game *g,int x,int y,Element element,bool hit) {
+static void styledImpact(Game *g,int x,int y,Element element,bool hit,uint8_t fireStyle) {
     int oldest=0;
     for(int i=1;i<IMPACT_CAP;++i) {
         if(g->impacts[i].ticks < g->impacts[oldest].ticks ||
            (g->impacts[i].ticks == g->impacts[oldest].ticks && !g->impacts[i].hit)) oldest=i;
     }
     if(!hit && g->impacts[oldest].hit && g->impacts[oldest].ticks==IMPACT_TICKS) return;
-    g->impacts[oldest]=(VisualImpact){x,y,IMPACT_TICKS,element,hit};
+    g->impacts[oldest]=(VisualImpact){x,y,IMPACT_TICKS,element,hit,fireStyle};
+}
+static void impact(Game *g,int x,int y,Element element,bool hit) {
+    styledImpact(g,x,y,element,hit,0);
 }
 static void cast(Game *g,int who,const MoveDef *m,int slot) {
     VisualCast *v=&g->casts[who];
@@ -91,6 +94,7 @@ void gameStart(Game *g) {
     g->partnerHp = mode == MODE_DUO || mode == MODE_TEAM ? PARTNER_HP : 0;
     g->partnerCooldown = 45;
     g->wave = 1;
+    if(!gameIsHorde(mode)) g->duelRound=1;
     g->enemyMaxHp = enemyMaxHp(g);
     g->enemyHp = g->enemyMaxHp;
     g->enemyCooldown = 30;
@@ -105,6 +109,24 @@ static void startPresentedFight(Game *g) {
     gameStart(g);
     g->introTicks=INTRO_TICKS;
     soundEvent(g,8);
+}
+bool gameDuelContinues(const Game *g) {
+    return g->state==STATE_RESULT && !gameIsHorde(g->mode) &&
+           g->playerRounds<2 && g->rivalRounds<2 && (g->duelRound<3 || g->result==RESULT_TIME);
+}
+static void nextDuelRound(Game *g) {
+    int round=g->duelRound+(g->result!=RESULT_TIME);
+    int wins=g->playerRounds,losses=g->rivalRounds;
+    int stage=gameStage(g),progress=g->evolutionTicks;
+    startPresentedFight(g);
+    g->duelRound=round;
+    g->playerRounds=wins;
+    g->rivalRounds=losses;
+    g->duelContinuation=true;
+    g->evolutionStage=stage;
+    g->evolved=stage>0;
+    g->evolutionTicks=progress;
+    g->playerHp=gameMaxHp(g);
 }
 static bool inRange(int ax, int ay, int bx, int by, int radius) {
     int dx = (ax - bx) / POS_SCALE, dy = (ay - by) / POS_SCALE;
@@ -131,6 +153,20 @@ static bool canAct(const Game *g) {
     return g->state == STATE_FIGHT && !g->introTicks && g->playerHp > 0 && (g->enemyHp > 0 || g->rival.hp > 0);
 }
 static void finish(Game *g, Result result) {
+    if(!gameIsHorde(g->mode)) {
+        if(result==RESULT_TIME) {
+            int playerHp=g->playerHp,playerMax=gameMaxHp(g);
+            int rivalHp=g->enemyHp,rivalMax=g->enemyMaxHp;
+            if(g->mode==MODE_TEAM) {
+                playerHp+=g->partnerHp;playerMax+=PARTNER_HP;
+                rivalHp+=g->rival.hp;rivalMax+=TEAM_RIVAL_HP;
+            }
+            int lead=playerHp*rivalMax-rivalHp*playerMax;
+            if(lead) result=lead>0?RESULT_WIN:RESULT_KO;
+        }
+        if(result==RESULT_WIN) ++g->playerRounds;
+        if(result==RESULT_KO) ++g->rivalRounds;
+    }
     g->result = result;
     g->state = STATE_RESULT;
     soundEvent(g,result==RESULT_WIN ? 6 : 7);
@@ -156,7 +192,7 @@ static void damageEnemy(Game *g, int damage) {
         for(int i=0;i<2;++i) g->casts[i].age=30;
         g->enemyDodgeTimer = g->enemyDodgeCooldown = 0;
         g->partnerCooldown = 45;
-        g->enemyX = (g->wave==2?40:176) * POS_SCALE;
+        g->enemyX = (g->wave==2?46:176) * POS_SCALE;
         g->enemyY = (g->wave==2?68:117) * POS_SCALE;
         memset(g->projectiles,0,sizeof(g->projectiles));
         memset(g->castEvents,0,sizeof(g->castEvents));
@@ -165,10 +201,10 @@ static void damageEnemy(Game *g, int damage) {
         g->cpuWindup=g->enemyMoving=g->dashes[1].ticks=0;
     } else finish(g, RESULT_WIN);
 }
-static void damageRival(Game *g,int damage,Element element) {
+static void damageRival(Game *g,int damage,Element element,uint8_t fireStyle) {
     g->rival.hp=clampInt(g->rival.hp-damage,0,TEAM_RIVAL_HP);
     g->rival.hurt=5;
-    impact(g,g->rival.x,g->rival.y,element,true);
+    styledImpact(g,g->rival.x,g->rival.y,element,true,fireStyle);
     if(!g->rival.hp && !g->enemyHp) finish(g,RESULT_WIN);
 }
 static int guardedDamage(const Game *g, int damage) {
@@ -202,7 +238,7 @@ void gameAttack(Game *g, int slot) {
     g->lastHit=hitEnemy || hitRival;
     if(!g->lastHit) return;
     g->ultimateCharge = clampInt(g->ultimateCharge + 9, 0, ULT_MAX);
-    if(hitRival) damageRival(g,damage,move->element);
+    if(hitRival) damageRival(g,damage,move->element,0);
     if(hitEnemy) {
         g->enemyHurtAnim=5;
         impact(g,g->enemyX,g->enemyY,move->element,true);
@@ -211,7 +247,7 @@ void gameAttack(Game *g, int slot) {
 }
 void gameUseUltimate(Game *g) {
     if (!canAct(g) || g->ultimateCharge < ULT_MAX || g->actionLock > 0 || g->roundDelay > 0 || g->dodgeTimer > 0 || g->dashes[0].ticks>0) return;
-    const MoveDef *move = &starters[g->selectedPokemon].ultimate;
+    const MoveDef *move = gameUltimateDef(g);
     if (!fireMove(g,true,move,move->damage + (gameStage(g)*8),true)) return;
     g->ultimateCharge = 0;
     g->actionLock = 10;
@@ -230,13 +266,13 @@ void gameEvolve(Game *g) {
     soundEvent(g,5);
     g->playerHp = clampInt(g->playerHp + 35, 0, gameMaxHp(g));
 }
-static void damagePlayer(Game *g, int damage,Element element) {
+static void damagePlayer(Game *g, int damage,Element element,uint8_t fireStyle) {
     if(g->dodgeTimer>0||g->hurtAnim>0||g->roundDelay>0)return;
     g->playerHp = clampInt(g->playerHp - damage,0,gameMaxHp(g));
     g->ultimateCharge = clampInt(g->ultimateCharge + 3,0,ULT_MAX);
     g->regenDelay = 63;
     g->hurtAnim = 5;
-    impact(g,g->playerX,g->playerY,element,true);
+    styledImpact(g,g->playerX,g->playerY,element,true,fireStyle);
     soundEvent(g,2);
     if (g->playerHp == 0) finish(g, RESULT_KO);
 }
@@ -287,7 +323,7 @@ static void updateDashes(Game *g) {
            arenaSweep(*x,*y,tx,ty,0,NULL)==ARENA_PATH_FULL) {
             d->hit=true;
             Element element=who?starters[gameEnemySpecies(g)].moves[g->cpuMove].element:gameMoveDef(g,2)->element;
-            if(who)damagePlayer(g,d->damage,element);
+            if(who)damagePlayer(g,d->damage,element,0);
             else {
                 g->lastHit=1;g->enemyHurtAnim=5;impact(g,g->enemyX,g->enemyY,element,true);
                 g->ultimateCharge=clampInt(g->ultimateCharge+9,0,ULT_MAX);soundEvent(g,2);
@@ -301,7 +337,7 @@ static void updateDashes(Game *g) {
             g->lastHit=1;
             g->ultimateCharge=clampInt(g->ultimateCharge+9,0,ULT_MAX);
             soundEvent(g,2);
-            damageRival(g,d->damage,gameMoveDef(g,2)->element);
+            damageRival(g,d->damage,gameMoveDef(g,2)->element,0);
             if(g->state!=STATE_FIGHT) return;
         }
     }
@@ -329,7 +365,7 @@ static bool fireMove(Game *g, bool mine, const MoveDef *move, int damage, bool u
 }
 bool gameFire(Game *g, bool mine, int damage, bool ultimate) {
     static const MoveDef cpuShot = {"CPU",MOVE_PROJECTILE,0,0,224,4,0,ELEMENT_NORMAL};
-    const MoveDef *move = mine ? (ultimate ? &starters[g->selectedPokemon].ultimate : &starters[g->selectedPokemon].moves[0]) : &cpuShot;
+    const MoveDef *move = mine ? (ultimate ? gameUltimateDef(g) : gameMoveDef(g,0)) : &cpuShot;
     /* This utility is for projectiles; a melee basic uses the generic shot profile. */
     if (move->kind != MOVE_PROJECTILE) move = &cpuShot;
     return fireMove(g,mine,move,damage,ultimate);
@@ -369,10 +405,11 @@ static void updateProjectiles(Game *g,int playerOldX,int playerOldY,int enemyOld
         int ty=arenaAt(oldY,p->mine?g->enemyY:g->playerY,stop[i]);
         bool targetHit=stop[i] && segmentHit(p->prevX-oldX,p->prevY-oldY,x-tx,y-ty,0,0,12) &&
                        arenaSweep(x,y,tx,ty,0,NULL)==ARENA_PATH_FULL;
+        uint8_t fireStyle=p->species==0 && p->element==ELEMENT_FIRE && p->style<=FX_FIRE_ULT?p->style+1:0;
         if (p->mine && g->enemyHp && g->enemyDodgeTimer == 0 && targetHit) {
             p->life = 0;
             g->lastHit = 1; g->enemyHurtAnim = 5;
-            impact(g,g->enemyX,g->enemyY,p->element,true);
+            styledImpact(g,g->enemyX,g->enemyY,p->element,true,fireStyle);
             soundEvent(g,2);
             if (!p->ultimate) g->ultimateCharge = clampInt(g->ultimateCharge+9,0,ULT_MAX);
             damageEnemy(g,guardedDamage(g,p->damage));
@@ -387,27 +424,27 @@ static void updateProjectiles(Game *g,int playerOldX,int playerOldY,int enemyOld
                 g->lastHit=1;
                 soundEvent(g,2);
                 if(!p->ultimate) g->ultimateCharge=clampInt(g->ultimateCharge+9,0,ULT_MAX);
-                damageRival(g,p->damage,p->element);
+                damageRival(g,p->damage,p->element,fireStyle);
                 if(g->state!=STATE_FIGHT) return;
                 continue;
             }
         }
         if (!p->mine && g->dodgeTimer == 0 && g->hurtAnim == 0 && targetHit) {
             p->life = 0;
-            damagePlayer(g,p->damage,p->element);
+            damagePlayer(g,p->damage,p->element,fireStyle);
             if (g->state != STATE_FIGHT) return;
         } else if(stop[i]<ARENA_PATH_FULL) {
             p->life=0;
-            impact(g,x,y,p->element,false);
+            styledImpact(g,x,y,p->element,false,fireStyle);
         } else if(p->life==1 && x>=ARENA_LEFT*POS_SCALE && x<=ARENA_RIGHT*POS_SCALE &&
                   y>=ARENA_TOP*POS_SCALE && y<=ARENA_BOTTOM*POS_SCALE) {
-            impact(g,x,y,p->element,false);
+            styledImpact(g,x,y,p->element,false,fireStyle);
         }
     }
     /* The final movement tick can still hit; expire only after collision checks. */
     for (int i = 0; i < PROJECTILE_CAP; ++i) {
         Projectile *p=&g->projectiles[i];
-        if(p->x<0||p->x>256*POS_SCALE||p->y<45*POS_SCALE||p->y>192*POS_SCALE)p->life=0;
+        if(p->x<0||p->x>256*POS_SCALE||p->y<(ARENA_TOP-4)*POS_SCALE||p->y>(ARENA_BOTTOM+2)*POS_SCALE)p->life=0;
         else decrement(&p->life);
     }
 }
@@ -426,7 +463,7 @@ static void cpu(Game *g) {
             if(m->kind!=MOVE_PROJECTILE&&m->kind!=MOVE_DASH&&
                inRange(g->playerX,g->playerY,g->cpuAimX,g->cpuAimY,m->range) &&
                arenaSweep(g->enemyX,g->enemyY,g->playerX,g->playerY,0,NULL)==ARENA_PATH_FULL)
-                damagePlayer(g,damage,m->element);
+                damagePlayer(g,damage,m->element,0);
             g->enemyCooldown=cpuProfiles[gameEnemySpecies(g)].cooldown;
             if(gameIsHorde(g->mode)) {
                 if(g->wave==1) g->enemyCooldown+=14;
@@ -483,7 +520,7 @@ static void supportCpu(Game *g) {
     if(r->windup) {
         if(--r->windup || !reach) return;
         Element element=starters[gameRivalSpecies(g)].moves[0].element;
-        if(!partner) damagePlayer(g,8,element);
+        if(!partner) damagePlayer(g,8,element,0);
         else if(g->partnerHp) {
             g->partnerHp=clampInt(g->partnerHp-8,0,PARTNER_HP);
             impact(g,x,y,element,true);
@@ -660,7 +697,10 @@ void gameUpdateInput(Game *g, uint32_t down, uint32_t held) {
     }
     if (g->state == STATE_RESULT) {
         if (down & IN_B) {g->menuCursor=TITLE_PLAY;g->state=STATE_TITLE;}
-        else if (down & IN_START) startPresentedFight(g);
+        else if (down & IN_START) {
+            if(gameDuelContinues(g)) nextDuelRound(g);
+            else startPresentedFight(g);
+        }
         return;
     }
     if (g->state == STATE_PAUSE) {
@@ -760,7 +800,7 @@ void gameUpdateInput(Game *g, uint32_t down, uint32_t held) {
         g->partnerCooldown = 45;
         ++g->partnerAttackSerial;
         Element element=starters[(g->selectedPokemon+1)%STARTER_COUNT].moves[0].element;
-        if(rivalTarget) damageRival(g,6,element);
+        if(rivalTarget) damageRival(g,6,element,0);
         else {
             impact(g,targetX,targetY,element,true);
             damageEnemy(g,g->enemyGuard>0?2:4);

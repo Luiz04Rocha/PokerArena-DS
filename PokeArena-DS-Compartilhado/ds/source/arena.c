@@ -3,12 +3,12 @@
 #include <stdlib.h>
 
 const ArenaProp arenaProps[] = {
-    {36, 88, 32, 32, 9, 8, PROP_ROCK},
-    {223, 153, 34, 34, 10, 9, PROP_ROCK_MOSS},
+    {30, 75, 28, 28, 9, 8, PROP_ROCK},
+    {265, 150, 32, 32, 10, 9, PROP_ROCK_MOSS},
     {246, 44, 28, 28, 8, 7, PROP_ROCK},
-    {-4, 169, 26, 26, 7, 7, PROP_ROCK_MOSS},
-    {248, 207, 36, 36, 11, 10, PROP_ROCK},
-    {57, 174, 42, 21, 16, 6, PROP_LOG},
+    {-7, 169, 26, 26, 7, 7, PROP_ROCK_MOSS},
+    {268, 216, 32, 32, 11, 10, PROP_ROCK},
+    {38, 177, 38, 19, 16, 6, PROP_LOG},
     {223, 211, 38, 19, 15, 6, PROP_LOG},
     {-5, 25, 56, 62, 5, 6, PROP_TREE},
     {33, 20, 56, 62, 5, 6, PROP_TREE},

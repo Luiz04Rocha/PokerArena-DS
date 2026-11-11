@@ -32,6 +32,11 @@ static int frameDelta,renderHalf;
 static int waterFrame, resultFrames, resultClock, trailWave;
 typedef struct {int x[4],y[4],count;} ActorTrail;
 static ActorTrail actorTrails[2];
+typedef struct { unsigned tick; int x,y; bool visible; } StepDust;
+static StepDust stepDust[ACTOR_COUNT];
+static volatile unsigned sceneStepDustDraws;
+static volatile unsigned sceneIdleBreaths;
+static volatile unsigned sceneCharmanderFx;
 static VisualCamera camera;
 static unsigned sceneVertices;
 static unsigned scenePolygons,primitiveStart;
@@ -113,14 +118,16 @@ void sceneCommitTextures(void) {
     if(REG_VCOUNT<192||REG_VCOUNT>=207){++sceneUploadLate;return;}
     uint8_t saved=VRAM_A_CR;
     vramSetBankA(VRAM_A_LCD);
-    for(int slot=0;slot<GROUND_TEXTURE;++slot) {
+    /* Finish both banks' actor frames before spending the window on effects. */
+    bool late=false;
+    for(int pass=0;pass<2 && !late;++pass) for(int slot=0;slot<GROUND_TEXTURE;++slot) {
         const uint16_t *data=pendingPixels[slot];
-        if(!data)continue;
-        if(REG_VCOUNT>=207){++sceneUploadLate;break;}
         int local=slot%DYNAMIC_TEXTURES;
         bool actor=local<ACTOR_COUNT;
+        if(!data || actor!=(pass==0))continue;
+        if(REG_VCOUNT>=207){++sceneUploadLate;late=true;break;}
         const uint16_t *pixels=actor?actorStage[slot/DYNAMIC_TEXTURES][local]:data;
-        if(textureMemory[slot])memcpy(textureMemory[slot],pixels,actor?2048:512);
+        if(textureMemory[slot])dmaCopy(pixels,textureMemory[slot],actor?2048:512);
         cachedPixels[slot]=data;pendingPixels[slot]=NULL;++sceneTextureUploads;
     }
     unsigned line=REG_VCOUNT;
@@ -141,18 +148,26 @@ static void bindActor(int id,const NativeAnim *anim,int index,int palette) {
     int slot=textureBank*DYNAMIC_TEXTURES+id;
     const uint16_t *begin=anim->pixels+anim->frameOffsets[index];
     const uint16_t *end=anim->pixels+anim->frameOffsets[index+1];
-    if(cachedPixels[slot]!=begin && !nativeDecodeSprite(begin,end,actorStage[textureBank][id]))
-        ++sceneTextureFailures;
+    if(cachedPixels[slot]!=begin) {
+        uint16_t *stage=actorStage[textureBank][id];
+        if(!nativeDecodeSprite(begin,end,stage)) ++sceneTextureFailures;
+        /* DMA reads RAM directly on the ARM9, outside its data cache. */
+        DC_FlushRange(stage,sizeof(actorStage[textureBank][id]));
+    }
     bindSprite(id,begin,palette);
 }
-static void billboard(int x,int y,int width,int height,int z) {
+/* Vertical coordinates use the projection's subpixel grid. */
+static void billboardFixedY(int x,int y,int width,int height,int z) {
     int left=x-width/2,top=y-height;
     beginPrimitive(GL_QUADS);
-    glTexCoord2i(0,0);projectedVertex(left*256,top*256,z);
-    glTexCoord2i(boundTextureSize,0);projectedVertex((left+width)*256,top*256,z);
-    glTexCoord2i(boundTextureSize,boundTextureSize);projectedVertex((left+width)*256,y*256,z);
-    glTexCoord2i(0,boundTextureSize);projectedVertex(left*256,y*256,z);
+    glTexCoord2i(0,0);projectedVertex(left*256,top,z);
+    glTexCoord2i(boundTextureSize,0);projectedVertex((left+width)*256,top,z);
+    glTexCoord2i(boundTextureSize,boundTextureSize);projectedVertex((left+width)*256,y,z);
+    glTexCoord2i(0,boundTextureSize);projectedVertex(left*256,y,z);
     endPrimitive();
+}
+static void billboard(int x,int y,int width,int height,int z) {
+    billboardFixedY(x,y*256,width,height*256,z);
 }
 static void prop(int x,int y,int w,int h,int u,int v,int tw,int th) {
     int left=x-w/2,bottom=groundY(y),top=bottom-h,z=spriteDepth(y);
@@ -162,18 +177,20 @@ static void prop(int x,int y,int w,int h,int u,int v,int tw,int th) {
     glTexCoord2i(u+tw,v+th);projectedVertex((left+w)*256,bottom*256,z);
     glTexCoord2i(u,v+th);projectedVertex(left*256,bottom*256,z);endPrimitive();
 }
+static const int lanternX[]={31,225};
+enum { LANTERN_Y=43 };
 static void sceneryProps(void) {
     glBindTexture(0,textures[GROUND_TEXTURE+2]);glColor(RGB15(31,31,31));
     const int fenceX[6]={22,52,82,174,204,234};
-    for(int i=0;i<6;++i)prop(fenceX[i],46,32,32,64,0,32,32);
-    prop(102,46,12,32,64,0,12,32);prop(254,46,12,32,64,0,12,32);
+    for(int i=0;i<6;++i)prop(fenceX[i],42,32,32,64,0,32,32);
+    prop(102,42,12,32,64,0,12,32);prop(254,42,12,32,64,0,12,32);
     for(int i=0;i<arenaPropCount;++i) {
         const ArenaProp *p=&arenaProps[i];
         if(p->kind==PROP_LOG) prop(p->x,p->y,p->width,p->height,0,32,64,32);
         else if(p->kind!=PROP_TREE)
             prop(p->x,p->y,p->width,p->height,p->kind==PROP_ROCK_MOSS?32:0,0,32,32);
     }
-    prop(31,47,32,32,96,0,32,32);prop(225,47,32,32,96,0,32,32);
+    for(int i=0;i<2;++i) prop(lanternX[i],LANTERN_Y,32,32,96,0,32,32);
 }
 static void ellipse(int x,int y,int rx,int ry,int height,int color) {
     noTexture();color=tintColor(color);if(recording)recordCommand(FIFO_COLOR,(uint32_t)color,0,1);else glColor(color);
@@ -194,6 +211,28 @@ static void teamMarker(int x,int y,bool allied) {
     worldVertex(x+6,y+9,2);worldVertex(x,y+12,2);
     endPrimitive();
 }
+static void walkingDust(int id,unsigned tick,bool walking,int x,int y,int oldX,int oldY) {
+    StepDust *dust=&stepDust[id];
+    if(walking && (x!=oldX || y!=oldY) && (tick+id*3u)%8==0 &&
+       (!dust->visible || dust->tick!=tick)) {
+        *dust=(StepDust){tick,oldX/POS_SCALE-4*((x>oldX)-(x<oldX)),
+                         oldY/POS_SCALE-4*((y>oldY)-(y<oldY)),true};
+    }
+    unsigned age=tick-dust->tick;
+    if(!dust->visible || age>=8) return;
+    noTexture();
+    glPolyFmt(POLY_ALPHA(23-age*2)|POLY_CULL_NONE|POLY_ID(28+id));
+    beginPrimitive(GL_QUADS);
+    for(int i=0;i<3;++i) {
+        int px=dust->x+(i-1)*(3+age/3),py=dust->y+(i==1?2:0);
+        int h=3+age/2+i%2,r=i==1?2:1;
+        color(i==1?RGB15(30,24,15):RGB15(27,21,13));
+        worldVertex(px-r,py,h);worldVertex(px,py-r,h+1);
+        worldVertex(px+r,py,h);worldVertex(px,py+r,h-1);
+    }
+    endPrimitive();
+    ++sceneStepDustDraws;
+}
 static void ground(void) {
     glBindTexture(0,textures[GROUND_TEXTURE]);glColor(RGB15(31,31,31));
     beginPrimitive(GL_QUADS);
@@ -205,7 +244,7 @@ static void ground(void) {
 
 }
 typedef struct {int x,y,rx,ry;} Pond;
-static const Pond ponds[]={{19,207,20,14},{267,171,17,13}};
+static const Pond ponds[]={{19,212,20,14},{271,171,17,13}};
 static void pondBanks(void) {
     for(unsigned i=0;i<sizeof(ponds)/sizeof(ponds[0]);++i) {
         const Pond *p=&ponds[i];
@@ -233,7 +272,44 @@ static void waterRipples(void) {
     }
     endPrimitive();
 }
+static void stoneSurface(int x0,int x1,int y0,int y1,int h0,int h1,int shade) {
+    color(shade);
+    worldVertex(x0,y0,h0);worldVertex(x1,y0,h0);
+    worldVertex(x1,y1,h1);worldVertex(x0,y1,h1);
+}
+static void stoneBlock(int x,int y,int w,int d,int bottom,int top) {
+    stoneSurface(x,x+w,y+d,y+d,bottom,top,RGB15(11,14,15));
+    color(RGB15(9,12,14));
+    worldVertex(x+w,y,bottom);worldVertex(x+w,y+d,bottom);
+    worldVertex(x+w,y+d,top);worldVertex(x+w,y,top);
+    color(RGB15(13,17,17));
+    worldVertex(x,y,bottom);worldVertex(x,y+d,bottom);
+    worldVertex(x,y+d,top);worldVertex(x,y,top);
+    stoneSurface(x,x+w,y,y+d,top,top,RGB15(21,23,19));
+}
+static void arenaEntrance(void) {
+    noTexture();
+    beginPrimitive(GL_QUADS);
+    /* Keep the threshold beyond the north edge of the playable area. */
+    stoneSurface(104,152,18,47,1,1,RGB15(12,16,15));
+    for(int row=0;row<4;++row) {
+        for(int col=0;col<4;++col) {
+            int x=106+col*11+(row&1)*2;
+            int y=20+row*6;
+            int light=(row+col*2)%3;
+            stoneSurface(x,x+10,y,y+5,2,2,RGB15(17+light,20+light,17+light));
+        }
+    }
+    for(int x=102;x<=144;x+=42) {
+        stoneBlock(x-2,34,14,12,0,3);
+        stoneBlock(x,36,10,8,3,12);
+        stoneBlock(x-1,35,12,10,12,15);
+        stoneSurface(x+1,x+9,37,41,16,16,RGB15(16,22,13));
+    }
+    endPrimitive();
+}
 static void decor(void) {
+    arenaEntrance();
     pondBanks();
     for(int i=0;i<arenaPropCount;++i) {
         const ArenaProp *prop=&arenaProps[i];
@@ -344,6 +420,7 @@ static void actor(int id,int species,int requested,int facing,uint32_t serial,in
         p->serial=serial;
         p->once=false;
         p->walkGrace=0;
+        p->idleBlend=0;
     } else visualPoseStep(p,species,requested,facing,serial,frameDelta,duration(species,p->anim));
     int anim=p->anim,elapsed=p->elapsed;
     bool loop=!p->once;
@@ -365,7 +442,8 @@ static void actor(int id,int species,int requested,int facing,uint32_t serial,in
         }
     }
     const NativeAnim *a=&nativeSpecies[species].anim[anim];
-    int frame=visualFrame(a->durations,a->frames,elapsed,loop);
+    /* Idle sheets can shift the feet. In combat, keep their stance and animate the body. */
+    int frame=anim==NATIVE_IDLE && !reaction && !previewSize?0:visualFrame(a->durations,a->frames,elapsed,loop);
     int index=facing*a->frames+frame;
     const int8_t *anchor=a->anchors?a->anchors+4*index:NULL;
     if(anim==NATIVE_CELEBRATE && anchor) {
@@ -381,11 +459,21 @@ static void actor(int id,int species,int requested,int facing,uint32_t serial,in
     int base=previewSize?previewSize:48;
     int size=base*a->sourceSize/40;
     int width=size,height=size,footX=x;
-    int sy=groundY(y)+(anchor?anchor[1]:a->foot[facing])*height/a->sourceSize,z=spriteDepth(y);
+    int footOffset=anchor?anchor[1]:a->foot[facing];
+    int sy=groundY(y)+footOffset*height/a->sourceSize,z=spriteDepth(y);
+    int breath=0;
+    if((anim==NATIVE_IDLE || anim==NATIVE_WALK) && !reaction && !previewSize && !dodge && p->idleBlend) {
+        unsigned phase=((unsigned)(anim==NATIVE_IDLE?elapsed:p->idleTime)*256+id*8192u)&32767u;
+        breath=(4096-cosLerp(phase))*p->idleBlend*3/640;
+        if(breath) ++sceneIdleBreaths;
+    }
+    int bottomQ8=sy*256+footOffset*breath/a->sourceSize;
+    int heightQ8=height*256+breath;
     if(anchor) x-=anchor[0]*width/a->sourceSize;
     if(period==3&&a->flame) {
         const uint8_t *point=a->flame+2*index;
-        if(point[1]!=255)tailLight(id,x-width/2+point[0]*width/256,sy-height+point[1]*height/256,z/256,y);
+        if(point[1]!=255)tailLight(id,x-width/2+point[0]*width/256,
+                                  (bottomQ8-heightQ8+point[1]*heightQ8/256)/256,z/256,y);
     }
     bindActor(id,a,index,species);
     glPolyFmt(POLY_ALPHA(31)|POLY_CULL_NONE|POLY_ID(id==3?27:id+1));
@@ -401,7 +489,7 @@ static void actor(int id,int species,int requested,int facing,uint32_t serial,in
         }
         glPolyFmt(POLY_ALPHA(31)|POLY_CULL_NONE|POLY_ID(id+1));
     }
-    billboard(x,sy,width,height,z);
+    billboardFixedY(x,bottomQ8,width,heightQ8,z);
     if(id<2 && frameDelta) {
         ActorTrail *trail=&actorTrails[id];
         for(int i=3;i>0;--i) {trail->x[i]=trail->x[i-1];trail->y[i]=trail->y[i-1];}
@@ -480,11 +568,135 @@ static void impactRing(const VisualImpact *impact,int slot,int age) {
     }
     endPrimitive();
 }
+typedef struct {int x,y,dx,dy;} FireAxis;
+static FireAxis fireAxis(int x,int y,int angle) {
+    return (FireAxis){x,y,sinLerp(angle),cosLerp(angle)};
+}
+static void fireVertex(FireAxis a,int forward,int side,int height) {
+    worldVertex(a.x+(a.dx*forward+a.dy*side)/4096,
+                a.y+(a.dy*forward-a.dx*side)/4096,height);
+}
+static void fireTriangle(FireAxis a,int from,int center,int length,int width,int height) {
+    fireVertex(a,from,center-width,height);
+    fireVertex(a,from,center+width,height);
+    fireVertex(a,from+length,center,height+2);
+}
+static void drawCharmanderImpact(const VisualImpact *impact,int age,int slot) {
+    int style=impact->fireStyle-1;
+    int size=style==FX_FIRE_ULT?3:style==FX_FIRE_BEAM?2:1;
+    int count=impact->hit?3+size:3;
+    int x=impact->x/POS_SCALE,y=impact->y/POS_SCALE;
+    noTexture();
+    glPolyFmt(POLY_ALPHA((impact->hit?28:22)-age)|POLY_CULL_NONE|POLY_ID(40+slot));
+    beginPrimitive(GL_TRIANGLES);
+    for(int i=0;i<count;++i) {
+        FireAxis a=fireAxis(x,y,i*32768/count+2048);
+        int reach=(2+age/3)*size;
+        glColor(i%2?RGB15(31,12,3):RGB15(31,26,9));
+        fireTriangle(a,reach/2,0,reach,impact->hit?size+1:1,3+age/3);
+    }
+    endPrimitive();
+}
+static void drawCharmanderShot(int style,int x,int y,int height,int facing,int age,int reach,int id) {
+    FireAxis a=fireAxis(x,y,facing*4096);
+    noTexture();
+    glPolyFmt(POLY_ALPHA(30)|POLY_CULL_NONE|POLY_ID(id));
+    beginPrimitive(GL_TRIANGLES);
+    if(style==FX_FIRE_BOLT) {
+        for(int i=-1;i<=1;++i) {
+            int offset=i*(3+age%4),tail=i?5:10;
+            glColor(i?RGB15(30,10,2):RGB15(31,16,2));
+            fireTriangle(a,-tail,offset,tail+4,i?2:4,height+i);
+            glColor(RGB15(31,29,12));
+            fireTriangle(a,0,offset,3,1,height+i+2);
+        }
+    } else if(style==FX_FIRE_BEAM) {
+        /* A serrated sheet, with alternating tongues along the flame edge. */
+        int width=4+age%4;
+        for(int i=0;i<4;++i) {
+            int tail=-reach+i*reach/5;
+            int side=(i&1?1:-1)*(width-1);
+            glColor(i%2?RGB15(30,7,2):RGB15(31,14,2));
+            fireTriangle(a,tail,side,reach/2+7,width,height+i%3);
+        }
+        glColor(RGB15(31,24,5));
+        fireTriangle(a,-reach*3/4,0,reach*3/4+10,6,height+3);
+        glColor(RGB15(31,31,17));
+        fireTriangle(a,-reach/3,0,reach/3+7,2,height+6);
+    } else {
+        /* A head with a pointed snout, swept horns and two angular wings. */
+        for(int side=-1;side<=1;side+=2) {
+            glColor(RGB15(24,5,5));
+            fireVertex(a,6,side*3,height+4);
+            fireVertex(a,-13,side*(12+age%5),height+9);
+            fireVertex(a,-8,side*2,height);
+            glColor(RGB15(31,18,3));
+            fireVertex(a,4,side*3,height+6);
+            fireVertex(a,-9,side*(9+age%5),height+8);
+            fireVertex(a,-5,side*2,height+3);
+            glColor(RGB15(31,25,6));
+            fireVertex(a,6,side*4,height+6);
+            fireVertex(a,-3,side*7,height+15);
+            fireVertex(a,1,side*2,height+8);
+        }
+        glColor(RGB15(31,10,3));fireTriangle(a,-9,0,22,6,height+5);
+        glColor(RGB15(31,29,11));fireTriangle(a,1,0,11,3,height+9);
+        glColor(RGB15(31,31,24));fireTriangle(a,6,0,5,1,height+11);
+    }
+    endPrimitive();
+    sceneCharmanderFx|=1u<<style;
+}
+static void drawCharmanderCast(const VisualCast *v,int age,int total,int slot) {
+    int x=v->originX/POS_SCALE,y=v->originY/POS_SCALE;
+    if(v->style!=FX_FIRE_DASH && v->style!=FX_FIRE_BURST) {
+        int height=14;
+        attackOrigin(v->species,v->facing,&x,&height,8);
+        drawCharmanderShot(v->style,x,y,height,v->facing,age,8+age,8+slot);
+        return;
+    }
+    noTexture();
+    glPolyFmt(POLY_ALPHA(28-age*12/total)|POLY_CULL_NONE|POLY_ID(8+slot));
+    beginPrimitive(GL_TRIANGLES);
+    if(v->style==FX_FIRE_BURST) {
+        for(int i=0;i<10;++i) {
+            FireAxis a=fireAxis(x,y,i*32768/10);
+            int r=v->range-5+age*5/total;
+            glColor(i%2?RGB15(31,13,3):RGB15(31,7,2));
+            fireVertex(a,r-11,-6,3);fireVertex(a,r-11,6,3);
+            fireVertex(a,r+2,0,5+(total-age)*(i%3+2)/4);
+            glColor(RGB15(31,27,9));
+            fireVertex(a,r-9,-3,4);fireVertex(a,r-9,3,4);
+            fireVertex(a,r-1,0,5+(total-age)*(i%3+1)/4);
+        }
+    } else {
+        int head=age<v->motionTicks*2?age:v->motionTicks*2;
+        for(int i=0;i<3;++i) {
+            int step=head-i*3;
+            if(step<0)continue;
+            int progress=gameDashProgress(step);
+            int px=(v->originX+(v->x-v->originX)*progress/256)/POS_SCALE;
+            int py=(v->originY+(v->y-v->originY)*progress/256)/POS_SCALE;
+            FireAxis a=fireAxis(px,py,v->facing*4096);
+            for(int side=-1;side<=1;side+=2) {
+                glColor(i?RGB15(28,8,3):RGB15(31,17,4));
+                fireVertex(a,-14,side*(9-i),4);fireVertex(a,-8,side*(12-i),6);fireVertex(a,9,side*4,9);
+                glColor(RGB15(31,28,11));
+                fireVertex(a,-8,side*(8-i),6);fireVertex(a,-4,side*(10-i),8);fireVertex(a,7,side*4,10);
+            }
+        }
+    }
+    endPrimitive();
+    sceneCharmanderFx|=1u<<v->style;
+}
 static void drawCast(const VisualCast *v,int slot) {
     if(!v->ticks) return;
     static const int dx[8]={0,181,256,181,0,-181,-256,-181};
     static const int dy[8]={256,181,0,-181,-256,-181,0,181};
     int age=v->age*2+renderHalf,total=v->totalTicks*2;
+    if(v->species==0 && v->style<=FX_FIRE_ULT) {
+        drawCharmanderCast(v,age,total,slot);
+        return;
+    }
     int frame=age*6/total;if(frame>5)frame=5;
     int alpha=6+v->ticks*16/v->totalTicks;
     glPolyFmt(POLY_ALPHA(alpha)|POLY_CULL_NONE|POLY_ID(8+slot));
@@ -509,7 +721,8 @@ static void drawCast(const VisualCast *v,int slot) {
             worldVertex(x+c*radius/4096,y+s*radius/4096,3);
             worldVertex(x+c*(radius-2)/4096,y+s*(radius-2)/4096,3);
         }
-        endPrimitive();fxBind(slot,v->style,v->facing,frame);
+        endPrimitive();
+        fxBind(slot,v->style,v->facing,frame);
         for(int i=0;i<6;++i) {int a=i*32768/6;effectAt(x+cosLerp(a)*radius/4096,y+sinLerp(a)*radius/4096,16,8);}
     } else {
         if(v->kind==MOVE_MELEE) {
@@ -570,7 +783,7 @@ void sceneDraw(const Game *g,const Game *old,int half,int displayTicks) {
     sceneVertices=scenePolygons=0;
     ++sceneRenderCount;textureBank^=1;
     bool newBattle=g->state==STATE_FIGHT&&previousState!=STATE_FIGHT&&previousState!=STATE_PAUSE;
-    if(newBattle) {
+    if(newBattle && !g->duelContinuation) {
         lightingSeed^=sceneRenderCount*747796405u+(uint32_t)(g->selectedPokemon+1)*2891336453u;
         battlePeriod=visualRandomPeriod(&lightingSeed);++sceneRandomSelections;
     }
@@ -597,6 +810,7 @@ void sceneDraw(const Game *g,const Game *old,int half,int displayTicks) {
         for(int i=0;i<ACTOR_COUNT;++i) {memset(&poses[i],0,sizeof(poses[i]));poses[i].species=-1;}
     if(newBattle || trailWave!=g->wave) {
         memset(actorTrails,0,sizeof(actorTrails));
+        memset(stepDust,0,sizeof(stepDust));
         trailWave=g->wave;
     }
     previousState=g->state;
@@ -630,23 +844,52 @@ void sceneDraw(const Game *g,const Game *old,int half,int displayTicks) {
     if(period>=2) {
         noTexture();
         for(int lamp=0;lamp<2;++lamp)for(int ring=0;ring<3;++ring) {
-            int x=lamp?218:38,rad=24-ring*7;
-            glPolyFmt(POLY_ALPHA((period==3?4:2)+ring*3)|POLY_CULL_NONE|POLY_ID(56+ring));
-            glColor(RGB15(31,25,12));beginPrimitive(GL_TRIANGLE_STRIP);
+            int x=lanternX[lamp],y=LANTERN_Y+3,rad=22-ring*6;
+            glPolyFmt(POLY_ALPHA((period==3?3:1)+ring*2)|POLY_CULL_NONE|POLY_ID(56+ring));
+            glColor(RGB15(31,23,10));beginPrimitive(GL_TRIANGLE_STRIP);
             for(int i=0;i<=12;++i) {
-                int a=i*32768/12;worldVertex(x,58,2+ring);
-                worldVertex(x+cosLerp(a)*rad/4096,58+sinLerp(a)*rad/4096,2+ring);
+                int a=i*32768/12;worldVertex(x,y,2+ring);
+                worldVertex(x+cosLerp(a)*rad/4096,y+sinLerp(a)*rad/4096,2+ring);
             }
             endPrimitive();
         }
     }
     /* A handful of drifting leaves, at the margins of the playable clearing. */
     noTexture();glPolyFmt(POLY_ALPHA(19)|POLY_CULL_NONE|POLY_ID(55));
-    for(int i=0;i<4;++i) {
-        int t=(int)(g->frameCounter/2)+i*67,x=(t/2+i*53)%280-12,y=35+(t+i*47)%180;
-        if(abs(x-128)<65&&abs(y-117)<45)continue;
-        flatColor(17+i,22,7);beginPrimitive(GL_TRIANGLES);
-        worldVertex(x-2,y,14);worldVertex(x+2,y,15);worldVertex(x,y+3,14);endPrimitive();
+    beginPrimitive(GL_QUADS);
+    for(int i=0;i<8;++i) {
+        int periodTicks=92+i*9;
+        int t=(g->frameCounter+i*43u)%periodTicks;
+        if(t>=periodTicks-12) continue;
+        int x=(i&1?242:24)+sinLerp(t*640+i*4096)/512;
+        int y=66+(i/2)*37+t/9;
+        int height=25-t*23/(periodTicks-12);
+        int width=1+abs(sinLerp(t*960+i*1024))/2048;
+        color(i%3?RGB15(18,24,8):RGB15(26,22,8));
+        worldVertex(x-width,y,height);worldVertex(x,y-2,height);
+        worldVertex(x+width,y,height);worldVertex(x,y+2,height);
+    }
+    for(int i=0;i<6;++i) {
+        int phase=(g->frameCounter+i*29u)%128;
+        if(phase<16 || phase>104) continue;
+        int x=(i&1?238:19)+sinLerp(phase*420+i*3010)/768;
+        int y=91+i*15, h=4+phase/8;
+        color(period==3?RGB15(28,27,11):RGB15(24,27,15));
+        worldVertex(x-1,y,h);worldVertex(x,y-1,h);
+        worldVertex(x+1,y,h);worldVertex(x,y+1,h);
+    }
+    endPrimitive();
+    if(fight && !g->introTicks && !g->roundDelay) {
+        bool walk=!frozen;
+        unsigned tick=g->frameCounter;
+        walkingDust(0,tick,walk&&g->moving&&!g->dodgeTimer&&!g->dashes[0].ticks&&!g->attackAnim,
+                    g->playerX,g->playerY,old->playerX,old->playerY);
+        walkingDust(1,tick,walk&&g->enemyHp&&g->enemyMoving&&!g->enemyDodgeTimer&&!g->dashes[1].ticks,
+                    g->enemyX,g->enemyY,old->enemyX,old->enemyY);
+        walkingDust(2,tick,walk&&g->partnerHp&&g->partnerMoving,
+                    g->partnerX,g->partnerY,old->partnerX,old->partnerY);
+        walkingDust(3,tick,walk&&g->rival.hp&&g->rival.moving,
+                    g->rival.x,g->rival.y,old->rival.x,old->rival.y);
     }
     glPolyFmt(POLY_ALPHA(31)|POLY_CULL_NONE|POLY_ID(0));
     if(fight || g->state==STATE_RESULT) {
@@ -703,6 +946,11 @@ void sceneDraw(const Game *g,const Game *old,int half,int displayTicks) {
             if(age<8)attackOrigin(p->species,facing,&x,&height,8-age);
             glPolyFmt(POLY_ALPHA(p->life<3?9+p->life*6:27)|POLY_CULL_NONE|POLY_ID(4+i));
             if(!p->mine) ellipse(x,y,4,3,3,RGB15(25,6,6));
+            if(p->species==0 && p->style<=FX_FIRE_ULT) {
+                int reach=9+age;
+                drawCharmanderShot(p->style,x,y,height,facing,age,reach<35?reach:35,4+i);
+                continue;
+            }
             fxBind(PROJECTILE_TEXTURE+i,p->style,facing,(age/3)%6);
             effectAt(x,y,p->ultimate?30:20,height);
             if(p->ultimate||p->style%5==3||p->style==FX_SOLAR) {
@@ -715,6 +963,10 @@ void sceneDraw(const Game *g,const Game *old,int half,int displayTicks) {
             const VisualImpact *impact=&g->impacts[i];
             int age=(IMPACT_TICKS-impact->ticks)*2+renderHalf;
             groundReaction(impact,i,age);
+            if(impact->fireStyle) {
+                drawCharmanderImpact(impact,age,i);
+                continue;
+            }
             if(impact->hit) {
                 impactRing(impact,i,age);
                 int frame=age*6/(IMPACT_TICKS*2);

@@ -32,7 +32,14 @@ static void testWaves(void) {
                 if (wave < count) {
                     assert(g.state == STATE_FIGHT && g.wave == wave + 1 && g.enemyHp > 0);
                     assert(g.enemyGuard == 0 && g.enemyCooldown > 0);
-                } else assert(g.state == STATE_RESULT && g.result == RESULT_WIN);
+                } else {
+                    assert(g.state == STATE_RESULT && g.result == RESULT_WIN);
+                    if(gameIsHorde(g.mode)) {
+                        assert(!gameDuelContinues(&g) && !g.duelRound && !g.playerRounds && !g.rivalRounds);
+                        gameUpdate(&g,IN_START);
+                        assert(g.state==STATE_FIGHT && g.wave==1 && !g.duelRound);
+                    }
+                }
             }
         }
     }
@@ -109,6 +116,60 @@ static void testResultsAndClock(void) {
     g.fightTicks = 1;
     gameUpdate(&g, 0);
     assert(g.state == STATE_RESULT && g.result == RESULT_TIME && gameSecondsLeft(&g) == 0);
+    assert(gameDuelContinues(&g) && !g.playerRounds && !g.rivalRounds);
+    gameUpdate(&g,IN_START);
+    assert(g.state==STATE_FIGHT && g.duelRound==1 && g.introTicks==INTRO_TICKS);
+}
+static void testDuelRounds(void) {
+    Game g=fight(MODE_VS);
+    assert(g.duelRound==1 && !g.playerRounds && !g.rivalRounds);
+    g.evolutionTicks=EVOLUTION_TICKS;
+    gameEvolve(&g);
+    assert(gameStage(&g)==1);
+    g.evolutionTicks=123;
+    g.playerHp=gameMaxHp(&g)-10;
+    g.enemyHp=1;
+    g.enemyX=g.playerX;
+    g.enemyY=g.playerY;
+    gameAttack(&g,1);
+    assert(g.state==STATE_RESULT && g.result==RESULT_WIN && g.playerRounds==1 && gameDuelContinues(&g));
+
+    gameUpdate(&g,IN_START);
+    assert(g.state==STATE_FIGHT && g.duelRound==2 && g.introTicks==INTRO_TICKS);
+    assert(g.playerRounds==1 && !g.rivalRounds && g.duelContinuation);
+    assert(gameStage(&g)==1 && g.evolutionTicks==123 && g.playerHp==gameMaxHp(&g));
+    assert(g.enemyHp==g.enemyMaxHp && !g.moveCooldowns[1] && !g.ultimateCharge);
+    while(g.introTicks) gameUpdate(&g,0);
+    g.fightTicks=1;
+    g.enemyHp=1;
+    gameUpdate(&g,0);
+    assert(g.state==STATE_RESULT && g.result==RESULT_WIN && g.playerRounds==2 && !gameDuelContinues(&g));
+    gameUpdate(&g,IN_START);
+    assert(g.duelRound==1 && !g.playerRounds && !g.rivalRounds && !g.duelContinuation && !gameStage(&g));
+
+    g=fight(MODE_TEAM);
+    g.playerHp=0;
+    gameUpdate(&g,0);
+    assert(g.state==STATE_RESULT && g.rivalRounds==1 && gameDuelContinues(&g));
+    gameUpdate(&g,IN_START);
+    assert(g.duelRound==2 && g.partnerHp==PARTNER_HP && g.rival.hp==TEAM_RIVAL_HP);
+    while(g.introTicks) gameUpdate(&g,0);
+    g.fightTicks=1;
+    g.rival.hp=0;
+    gameUpdate(&g,0);
+    assert(g.state==STATE_RESULT && g.playerRounds==1 && g.rivalRounds==1 && gameDuelContinues(&g));
+    gameUpdate(&g,IN_START);
+    assert(g.state==STATE_FIGHT && g.duelRound==3 && g.playerRounds==1 && g.rivalRounds==1);
+    while(g.introTicks) gameUpdate(&g,0);
+    g.fightTicks=1;
+    gameUpdate(&g,0);
+    assert(g.state==STATE_RESULT && g.result==RESULT_TIME && gameDuelContinues(&g));
+    gameUpdate(&g,IN_START);
+    assert(g.duelRound==3 && g.playerRounds==1 && g.rivalRounds==1);
+    while(g.introTicks) gameUpdate(&g,0);
+    g.playerHp=0;
+    gameUpdate(&g,0);
+    assert(g.state==STATE_RESULT && g.rivalRounds==2 && !gameDuelContinues(&g));
 }
 static void testCombat(void) {
     Game g = fight(MODE_SOLO);
@@ -303,10 +364,27 @@ static void testMoveDataAndHud(void) {
             if (m->kind == MOVE_PROJECTILE) assert(m->speed > 0);
             if (m->kind == MOVE_DASH) assert(m->dashDistance > 0);
         }
-        int damage = gameAttackDamage(&g,0);
-        g.evolutionTicks = EVOLUTION_TICKS;
-        gameEvolve(&g);
-        assert(gameAttackDamage(&g,0) == damage+3);
+        const char *baseNames[MOVE_COUNT];
+        for(int slot=0;slot<MOVE_COUNT;++slot) baseNames[slot]=gameMoveDef(&g,slot)->name;
+        const char *baseUltimate=gameUltimateDef(&g)->name;
+        const char *previousNames[MOVE_COUNT];
+        memcpy(previousNames,baseNames,sizeof(previousNames));
+        const char *previousUltimate=baseUltimate;
+        for(int stage=1;stage<=gameFinalStage(&g);++stage) {
+            g.evolutionTicks=stage==1?EVOLUTION_TICKS:900;
+            gameEvolve(&g);
+            assert(gameStage(&g)==stage);
+            for(int slot=0;slot<MOVE_COUNT;++slot) {
+                const MoveDef *move=gameMoveDef(&g,slot);
+                assert(strcmp(move->name,baseNames[slot]) && strcmp(move->name,previousNames[slot]));
+                assert(gameAttackDamage(&g,slot)==move->damage+starters[pokemon].attackBonus+stage*3);
+                previousNames[slot]=move->name;
+            }
+            const MoveDef *ultimate=gameUltimateDef(&g);
+            assert(strcmp(ultimate->name,baseUltimate) && strcmp(ultimate->name,previousUltimate));
+            assert(ultimate->kind==MOVE_PROJECTILE && ultimate->speed>0);
+            previousUltimate=ultimate->name;
+        }
         g.moveCooldowns[3] = 37;
         TextScreen top,bottom;
         screensBuild(&g,&top,&bottom);
@@ -527,7 +605,7 @@ static void testSolidCover(void) {
     Game g=fight(MODE_VS);
     g.enemyCooldown=10000;
     g.playerX=rock->x*POS_SCALE;
-    for(int t=0;t<24;++t) gameUpdateInput(&g,0,IN_UP);
+    for(int t=0;t<32;++t) gameUpdateInput(&g,0,IN_UP);
     assert(g.playerY==south && !g.moving);
     for(int t=0;t<14;++t) gameUpdateInput(&g,0,IN_UP|IN_RIGHT);
     assert(g.playerX>(rock->x+rock->halfWidth+ARENA_ACTOR_MARGIN)*POS_SCALE && g.playerY<south);
@@ -560,7 +638,7 @@ static void testSolidCover(void) {
            p->x/POS_SCALE>=impactX-1 && p->x/POS_SCALE<=impactX) splash=true;
     }
     assert(splash);
-    g.enemyX=(impactX-10)*POS_SCALE;
+    g.enemyX=(impactX-6)*POS_SCALE;
     g.projectiles[0]=(Projectile){ARENA_LEFT*POS_SCALE,sideY,90*POS_SCALE,0,30,4,true,false,ELEMENT_FIRE};
     gameUpdate(&g,0);
     assert(g.enemyHp==hp-20); /* Cover behind the target does not eat the hit. */
@@ -650,6 +728,7 @@ int main(void) {
     testDodgeDirection();
     testMatchOpening();
     testTeamDuel();
+    testDuelRounds();
     testWaveBreakAndTactics();
     testSolidCover();testPoseTransitions();
     testSmoothDashAndSweptHits();testEffectsBufferAndCamera();

@@ -39,7 +39,7 @@ typedef struct {
 } PokemonDef;
 typedef struct { int x, y, vx, vy, damage, life; bool mine, ultimate; Element element; int style, age,prevX,prevY; uint32_t serial; int species; } Projectile;
 typedef struct { int x,y,originX,originY,facing,style,kind,range,ticks,totalTicks,source; int age,motionTicks; uint32_t serial; int species; } VisualCast;
-typedef struct { int x,y,ticks; Element element; bool hit; } VisualImpact;
+typedef struct { int x,y,ticks; Element element; bool hit; uint8_t fireStyle; } VisualImpact;
 typedef struct { int ticks,startX,startY,targetX,targetY,damage,range; bool hit; } DashAction;
 typedef struct {
     int x,y,hp,cooldown,windup,hurt;
@@ -56,6 +56,8 @@ typedef struct {
     bool muted;
     int playerHp, partnerHp, enemyHp, enemyMaxHp, ultimateCharge;
     int wave, fightTicks, moveCooldowns[MOVE_COUNT], actionLock, roundDelay, enemyCooldown, regenDelay;
+    int duelRound, playerRounds, rivalRounds;
+    bool duelContinuation;
     int introTicks;
     int bufferedMove, bufferTicks;
     int dodgeTimer, dodgeCooldown, enemyGuard, partnerCooldown, evolutionTicks;
@@ -83,6 +85,7 @@ typedef struct {
 extern const PokemonDef starters[STARTER_COUNT];
 extern const uint16_t elementColors[ELEMENT_COUNT];
 const MoveDef *gameMoveDef(const Game *g, int slot);
+const MoveDef *gameUltimateDef(const Game *g);
 int gameEnemySpecies(const Game *g);
 int gameRivalSpecies(const Game *g);
 bool gameAimsAtRival(const Game *g);
@@ -98,6 +101,7 @@ typedef struct { int hp, speed, distance, cooldown; } CpuProfile;
 extern const CpuProfile cpuProfiles[STARTER_COUNT];
 void gameInit(Game *g);
 void gameStart(Game *g);
+bool gameDuelContinues(const Game *g);
 void gameUpdate(Game *g, uint32_t down);
 void gameUpdateInput(Game *g, uint32_t down, uint32_t held);
 void gameAttack(Game *g, int slot);
