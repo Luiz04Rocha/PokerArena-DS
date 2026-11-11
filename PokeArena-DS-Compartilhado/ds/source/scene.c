@@ -272,7 +272,44 @@ static void waterRipples(void) {
     }
     endPrimitive();
 }
+static void stoneSurface(int x0,int x1,int y0,int y1,int h0,int h1,int shade) {
+    color(shade);
+    worldVertex(x0,y0,h0);worldVertex(x1,y0,h0);
+    worldVertex(x1,y1,h1);worldVertex(x0,y1,h1);
+}
+static void stoneBlock(int x,int y,int w,int d,int bottom,int top) {
+    stoneSurface(x,x+w,y+d,y+d,bottom,top,RGB15(11,14,15));
+    color(RGB15(9,12,14));
+    worldVertex(x+w,y,bottom);worldVertex(x+w,y+d,bottom);
+    worldVertex(x+w,y+d,top);worldVertex(x+w,y,top);
+    color(RGB15(13,17,17));
+    worldVertex(x,y,bottom);worldVertex(x,y+d,bottom);
+    worldVertex(x,y+d,top);worldVertex(x,y,top);
+    stoneSurface(x,x+w,y,y+d,top,top,RGB15(21,23,19));
+}
+static void arenaEntrance(void) {
+    noTexture();
+    beginPrimitive(GL_QUADS);
+    /* Keep the threshold beyond the north edge of the playable area. */
+    stoneSurface(104,152,18,47,1,1,RGB15(12,16,15));
+    for(int row=0;row<4;++row) {
+        for(int col=0;col<4;++col) {
+            int x=106+col*11+(row&1)*2;
+            int y=20+row*6;
+            int light=(row+col*2)%3;
+            stoneSurface(x,x+10,y,y+5,2,2,RGB15(17+light,20+light,17+light));
+        }
+    }
+    for(int x=102;x<=144;x+=42) {
+        stoneBlock(x-2,34,14,12,0,3);
+        stoneBlock(x,36,10,8,3,12);
+        stoneBlock(x-1,35,12,10,12,15);
+        stoneSurface(x+1,x+9,37,41,16,16,RGB15(16,22,13));
+    }
+    endPrimitive();
+}
 static void decor(void) {
+    arenaEntrance();
     pondBanks();
     for(int i=0;i<arenaPropCount;++i) {
         const ArenaProp *prop=&arenaProps[i];
