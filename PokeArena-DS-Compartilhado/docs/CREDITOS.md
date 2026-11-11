@@ -104,3 +104,5 @@ Importação direta do SpriteCollab conferida na [revisão f92cb9f](https://gith
 Na 0.17, as onze formas são geradas de `reference/spritecollab-f92cb9f`, com os créditos originais em cada pasta. O gerador adapta escala, paleta e formato para o DS. Ele usa o ponto branco de apoio da folha de sombra e o ponto da cabeça da folha de posições, conforme o [leitor do SpriteBot](https://github.com/PMDCollab/SpriteBot/blob/master/SpriteUtils.py).
 
 Na 0.18, as folhas Hop, Faint e Sleep vêm da mesma revisão do SpriteCollab. As lágrimas, estrelas e ondas de impacto são desenhadas pela ROM.
+
+Na 0.39, o gerador preserva a resolução original dos desenhos das onze formas ao alinhar os quadros pelo ponto de apoio da folha de sombra. O piscar de perfil é uma adaptação local da pose parada das mesmas folhas.

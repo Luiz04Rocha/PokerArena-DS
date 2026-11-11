@@ -771,14 +771,14 @@ void gameUpdateInput(Game *g, uint32_t down, uint32_t held) {
         return;
     }
     if (down & IN_SELECT) gameEvolve(g);
-    /* A short buffer preserves a single special press during the basic's wind-up. */
-    if (g->roundDelay == 0 && g->dodgeTimer == 0) {
+    /* Keep a press near the end of a dodge until the next legal attack. */
+    if (g->dodgeTimer < ACTION_BUFFER_TICKS) {
         int requested = -1;
         if ((down & IN_R) && g->ultimateCharge >= ULT_MAX) requested = MOVE_COUNT;
         else for (int slot = 1; slot < MOVE_COUNT; ++slot) {
-            if ((down & (IN_A << slot)) && g->moveCooldowns[slot] <= ACTION_BUFFER_TICKS) { requested = slot; break; }
+            if ((down & (IN_A << slot)) && g->moveCooldowns[slot] < ACTION_BUFFER_TICKS) { requested = slot; break; }
         }
-        if(requested<0&&(down&IN_A)&&g->moveCooldowns[0]<=ACTION_BUFFER_TICKS&&g->bufferedMove<1)requested=0;
+        if(requested<0&&(down&IN_A)&&g->moveCooldowns[0]<ACTION_BUFFER_TICKS&&g->bufferedMove<1)requested=0;
         if (requested >= 0) { g->bufferedMove = requested; g->bufferTicks = ACTION_BUFFER_TICKS; }
     }
     if (g->bufferTicks > 0) {

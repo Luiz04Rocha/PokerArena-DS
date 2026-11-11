@@ -14,10 +14,11 @@ typedef struct {
     bool once, hurtRequested;
 } VisualPose;
 typedef struct { int x,y,zoom; } VisualCamera; /* Q8 screen coordinates and zoom. */
+typedef struct { int x,y; } VisualCameraPoint; /* Fighter's feet in arena units. */
 int visualGroundY(int y);
 int visualRandomPeriod(uint32_t *state);
-void visualCameraStep(VisualCamera *camera,int playerX,int playerY,int enemyX,int enemyY,
-                      bool fight,bool frozen,int ultimateTicks);
+void visualCameraStep(VisualCamera *camera,const VisualCameraPoint *fighters,int count,
+                      int introTicks,bool frozen,int ultimateTicks);
 int visualLerp(int oldValue,int newValue,int half);
 int visualDirection(int x,int y);
 int visualTargetFacing(int current,int dx,int dy);
